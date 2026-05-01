@@ -2,21 +2,30 @@ import re
 import serial
 import time
 
+from modules.detectAT import initializeAtPort
 from flask import Flask, request, jsonify
 
-port = "/dev/ttyUSB2"
+# INITIALIZE THE AT PORT
+# - if no modem is detected, exit the program
+# - if modem is detected, map the AT command to the corresponding port
+modem, port = initializeAtPort()
+port = "/dev/" + port
+if port is None:
+   print("ERROR: no valid modem detected")
+   exit(1)
+
 app = Flask(__name__)
 
+# the entry point to return the basic information about the API
+# curl http://localhost:5000/
 @app.route("/")
-def hello_world():
-   return { "Version" : "1.0.0" }
+def root():
+   return { "Version" : "1.0.0" , "Modem": modem, "AT port": port, "Description": "API to send AT commands to the modem" }
 
-@app.route("/test")
-def test():
-   return { "Version" : "1.0.0" }
-
-# curl --request POST --header  "Content-Type: application/json" --data '{"cmd": "ATI", "timeout": 1}' http://localhost:5000/sendAtCmd
-@app.route("/sendAtCmd", methods=['POST'])
+# this is the most important call and the reason why all this is running at all
+# is is used to communicate and control the modem
+# curl --request POST --header  "Content-Type: application/json" --data '{"cmd": "ATI"}' http://localhost:5000/at
+@app.route("/at", methods=['POST'])
 def sendAt():
    # parse JSON parameters required
    content = request.get_json(silent=True)
@@ -32,10 +41,11 @@ def sendAt():
 
       # send command
       cmd = content['cmd'].strip() + '\r\n'
-      if content['timeout'] is None:
-         timeout = 2
+      if 'timeout' in content:
+         if content['timeout'] is None:
+            timeout = 2
       else:
-         timeout = content['timeout']
+         timeout = 2
       print( s.write(cmd.encode(encoding = 'ascii', errors = 'strict')) ) 
 
       # Get response
@@ -48,3 +58,6 @@ def sendAt():
       return { "Response" : "200", "cmd": cmd, "response": resp }
    else:
       return { "Response" : "400 - Bad request" }
+
+if __name__ == "__main__":
+   app.run(host="0.0.0.0", port=8666, debug=False)
