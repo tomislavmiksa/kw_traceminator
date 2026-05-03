@@ -1,0 +1,16 @@
+[Unit]
+Description=API Service to control the qcsuper module and the traces
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/serial-modemtracing
+Environment=VIRTUAL_ENV=/opt/serial-modemtracing/.venv
+Environment=PATH=/opt/serial-modemtracing/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/serial-modemtracing/.venv/bin/python3 -u /opt/serial-modemtracing/main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

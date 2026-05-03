@@ -1,0 +1,6 @@
+Flask
+requests
+pyserial
+pyusb
+crcmod
+pycrate

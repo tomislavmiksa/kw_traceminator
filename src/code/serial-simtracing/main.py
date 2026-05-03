@@ -2,11 +2,16 @@ import re
 import requests
 import time
 import subprocess
+from pathlib import Path
 from flask import Flask, request, jsonify
+
+# absolute path to the trace directory, next to this main.py
+TRACE_DIR = Path("/opt/serial-simtracing/traces")
+TRACE_DIR.mkdir(parents=True, exist_ok=True)
 
 # helper function to generate a unique filename for the trace
 def make_pcap_filename(suffix: str = "simtrace", ext: str = "pcap") -> str:
-    return f"./traces/{time.strftime('%Z-%Y%m%d-%H%M%S')}-{suffix}.{ext}"
+    return str(TRACE_DIR / f"{time.strftime('%Z-%Y%m%d-%H%M%S')}-{suffix}.{ext}")
 
 # INITIALIZE THE SIMTRACE2 PORT
 # - makes no sense to proceed if the simtrace2 is not detected
@@ -160,14 +165,8 @@ def startTrace():
 # start the trace capture process
 @app.route("/trace-list", methods=['GET'])
 def listTraces():
-   result = subprocess.run(
-      ["ls", "-1", "./traces"],
-      capture_output=True, text=True,
-   )
-   if result.returncode != 0:
-      return {"error": result.stderr.strip()}, 500
-   files = [name for name in result.stdout.splitlines() if name]
-   return {"info": "list of traces", "traces": files}
+   files = sorted(p.name for p in TRACE_DIR.glob("*.pcap"))
+   return {"info": "list of traces", "dir": str(TRACE_DIR), "traces": files}
 
 if __name__ == "__main__":
    app.run(host="0.0.0.0", port=8777, debug=False)

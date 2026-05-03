@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "/opt/qcsuper/qcsuper.py", line 6, in <module>
+    main()
+    ~~~~^^
+  File "/opt/qcsuper/src/qcsuper/main.py", line 202, in main
+    args = parser.parse_args()
+  File "/usr/lib/python3.13/argparse.py", line 1912, in parse_args
+    args, argv = self.parse_known_args(args, namespace)
+                 ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/argparse.py", line 1922, in parse_known_args
+    return self._parse_known_args2(args, namespace, intermixed=False)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/argparse.py", line 1951, in _parse_known_args2
+    namespace, args = self._parse_known_args(args, namespace, intermixed)
+                      ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/argparse.py", line 2202, in _parse_known_args
+    start_index = consume_optional(start_index)
+  File "/usr/lib/python3.13/argparse.py", line 2126, in consume_optional
+    take_action(action, args, option_string)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/argparse.py", line 2012, in take_action
+    argument_values = self._get_values(action, argument_strings)
+  File "/usr/lib/python3.13/argparse.py", line 2532, in _get_values
+    value = self._get_value(action, arg_string)
+  File "/usr/lib/python3.13/argparse.py", line 2565, in _get_value
+    result = type_func(arg_string)
+  File "/opt/qcsuper/src/qcsuper/modules/_utils.py", line 63, in __call__
+    file_obj = open(path, self.mode)
+FileNotFoundError: [Errno 2] No such file or directory: './traces/CEST-20260503-160506-qcsuper.pcap'
