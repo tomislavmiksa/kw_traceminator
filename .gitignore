@@ -14,3 +14,7 @@ env/
 .idea/
 .DS_Store
 *.swp
+
+# The trace files, they should not be tracked
+*.pcap
+*.pcapng

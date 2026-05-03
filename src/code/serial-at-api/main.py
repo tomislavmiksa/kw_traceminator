@@ -28,18 +28,24 @@ def root():
 # call: curl --request POST --header  "Content-Type: application/json" --data '{"cmd": "ATI"}' http://localhost:8666/at
 @app.route("/at", methods=['POST'])
 def sendAt():
-   # parse JSON parameters required
-   content = request.get_json(silent=True)
    # verify if command passed is AT command
    regex = "^[aA][tT].*"
-   if content['cmd'] is not None and re.match(regex, content['cmd']):
-      
+   # parse JSON parameters required
+   content = request.get_json(silent=True)
+   if content is None:
+      return { "Response" : "400 - Bad request" }
+   elif 'cmd' not in content.keys():
+      return { "Response" : "400 - Bad request" }
+   elif content['cmd'] is None:
+      return { "Response" : "400 - Bad request" }
+   elif not re.match(regex, content['cmd']):
+      return { "Response" : "400 - Bad request" }
+   else:
       # establish serial connection
       s =  serial.Serial(port=port,baudrate=115200,timeout=0,rtscts=0,xonxoff=0)
       # clear the old junk if any
       # s.flushInput()
       # s.flushOutput()
-
       # send command
       cmd = content['cmd'].strip() + '\r\n'
       if 'timeout' in content:
@@ -48,7 +54,6 @@ def sendAt():
       else:
          timeout = 2
       print( s.write(cmd.encode(encoding = 'ascii', errors = 'strict')) ) 
-
       # Get response
       # - wait if the modem is busy
       time.sleep(timeout)
@@ -57,12 +62,9 @@ def sendAt():
       resp = re.sub(r"[\r\n]+", ";", resp)          # replace new lines with semicolon
       resp = re.sub(r"(?:\\[rn])+", ";",  resp)     # replace carriage return with semicolon
       resp = re.sub(r"(?:\s*;\s*)+", ";",  resp)    # replace multiple semicolons with a single semicolon
-
       # close serial connection
       s.close()
       return { "Response" : "200", "cmd": content['cmd'].strip(), "response": resp }
-   else:
-      return { "Response" : "400 - Bad request" }
 
 # returns the information about the modem port mappings
 # will be used by other modules to get the correct mapping for the modem

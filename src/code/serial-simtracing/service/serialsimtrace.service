@@ -1,0 +1,16 @@
+[Unit]
+Description=API Service to control the simtrace2 module and the traces
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/serial-simtracing
+Environment=VIRTUAL_ENV=/opt/serial-simtracing/.venv
+Environment=PATH=/opt/serial-simtracing/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/serial-simtracing/.venv/bin/python3 -u /opt/serial-simtracing/main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
