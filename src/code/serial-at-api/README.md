@@ -12,6 +12,9 @@ curl http://localhost:8666/
 # execute the AT command and get the output result
 # - with the command bellow you are getting back the output of the ATI Command
 curl --request POST --header  "Content-Type: application/json" --data '{"cmd": "ATI"}' http://localhost:8666/at
+
+# get the modem ports mapping information
+curl http://localhost:8666/modem
 ```
 
 # Application Setup

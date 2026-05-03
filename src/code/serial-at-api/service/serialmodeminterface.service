@@ -1,0 +1,16 @@
+[Unit]
+Description=API Service to map the Modem ports and interact with the AT interface
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/serial-at-api
+Environment=VIRTUAL_ENV=/opt/serial-at-api/.venv
+Environment=PATH=/opt/serial-at-api/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/serial-at-api/.venv/bin/python3 -u /opt/serial-at-api/main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

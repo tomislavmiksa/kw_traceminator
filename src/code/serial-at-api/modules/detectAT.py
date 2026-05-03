@@ -1,30 +1,54 @@
+import json
 import subprocess
+from pathlib import Path
 
-def initializeAtPort():
-   # INITIALIZE THE AT PORT
-   # - if no modem is detected, exit the program
-   # - if modem is detected, map the AT command to the corresponding port
+MODEM_DATA_FILE = Path(__file__).parent / "data" / "modem.json"
+
+# function to load the modem data from the JSON file
+# - the file contains the modem name and the corresponding interfaces mapping (AT, NMEA, Diag, Modem, NDIS)
+# - the function returns the modem data as a dictionary
+def loadModemData() -> dict:
+   with MODEM_DATA_FILE.open("r", encoding="utf-8") as f:
+      data = json.load(f)
+   return data[0] if isinstance(data, list) else data
+
+# function to get the ports mapping for the specific interface
+# - the function returns the port name as a string
+# - if interface is not detected return None
+def getModemInterfaces(interface):
+   # GET the modems connected to the system
    result = subprocess.run(
-      "lsusb | grep Quectel | grep EC25 | wc -l",
+      f"ls -l /dev/serial/by-id/ | grep Android | grep {interface} | cut -f 11 | cut -d '/' -f 3",
       shell=True,
       capture_output=True,
       text=True,
    )
-   if int(result.stdout) > 0:
-      # EC25 modem is detected, mapping the AT command to the corresponding port
-      # - if00 -> Diag port
-      # - if01 -> NMEA port
-      # - if02 -> AT port
-      # - if03 -> Modem port
-      # - if04 -> NDIS port
-      result = subprocess.run(
-         "ls -l /dev/serial/by-id/ | grep Android | grep if02 | awk '{print $11}' | cut -d '/' -f 3",
-         shell=True,
-         capture_output=True,
-         text=True,
-      )
-      print(f"AT port: {result.stdout}")
-      return "Quectel EC25", result.stdout.strip()
-   else:
-      # EC25 modem is not detected, return error
-      return None,None
+   return "/dev/" + result.stdout.strip() if result.stdout.strip() else None
+
+def getModemPorts() -> dict:
+   modems = loadModemData()
+   for modem in modems:
+         return { "modem": modem, 
+                  "Diag": getModemInterfaces(modems[modem]['Diag']), 
+                  "NMEA": getModemInterfaces(modems[modem]['NMEA']), 
+                  "AT": getModemInterfaces(modems[modem]['AT']), 
+                  "Modem": getModemInterfaces(modems[modem]['Modem']), 
+                  "NDIS": getModemInterfaces(modems[modem]['NDIS'])
+                }
+   # if modem is not detected return interface value as None
+   return { "modem": None, 
+            "Diag": None, 
+            "NMEA": None, 
+            "AT": None, 
+            "Modem": None, 
+            "NDIS": None
+          }
+
+# function to test the module
+# - the function tests the module by loading the modem data and initializing the AT port
+# - the function prints the modem data and the AT port mapping
+if __name__ == "__main__":
+   modems = loadModemData()
+   print(modems)
+   a = getModemPorts()
+   print(a)
