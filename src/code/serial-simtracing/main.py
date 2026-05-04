@@ -52,38 +52,28 @@ def getSniff():
 # start the SIMTRACE2 sniffing process
 @app.route("/sniff-start", methods=['GET'])
 def startSniff() -> bool:
-   precondition = False
+   r = requests.get("http://localhost:8777/sniff-active")
+   print(r.status_code)
+   print(r.json())
    LOG = "/var/log/simtrace2-sniff.log"
    name = "simtrace2-sniff"
    log_fh = open(LOG, "ab", buffering=0)
-   while not precondition:
-      r = requests.get("http://localhost:8777/sniff-active")
-      if r.status_code != 200:
-          precondition = False
-          proc = subprocess.Popen(
+   # stop the trace if is already running
+   if r.status_code == 200:
+      if r.json()["running"]:
+         r = requests.get("http://localhost:8777/sniff-stop")
+   else:
+      r = requests.get("http://localhost:8777/sniff-stop")
+   # start the sniffer
+   proc = subprocess.Popen(
               [name],
               stdin=subprocess.DEVNULL,
               stdout=log_fh,
               stderr=subprocess.STDOUT,
               start_new_session=True,   # detach: new session, immune to terminal hangup
               close_fds=True,
-          )
-          time.sleep(3)
-      else:
-          data = r.json()
-          if data["running"]:
-              precondition = True
-          else:
-              precondition = False
-              proc = subprocess.Popen(
-                  [name],
-                  stdin=subprocess.DEVNULL,
-                  stdout=log_fh,
-                  stderr=subprocess.STDOUT,
-                  start_new_session=True,   # detach: new session, immune to terminal hangup
-                  close_fds=True,
-              )
-              time.sleep(3)
+         )
+   time.sleep(1)
    return { "info" : "running", "pid" : proc.pid, "log" : LOG }
 
 # kill the SIMTRACE2 sniffing process
@@ -125,6 +115,9 @@ def getTrace():
 # stop all tcpdump processes whose command line contains "simtrace"
 @app.route("/trace-stop", methods=['GET'])
 def stopTrace():
+   # stop the sniffer, as if runs on nothing, gets out of sync
+   r = requests.get("http://localhost:8777/sniff-stop")
+   # get the trace processes
    matches = findSimtraceTcpdumps()
    if not matches:
       return { "info" : "no matching tcpdump process", "killed" : [] }
@@ -137,21 +130,10 @@ def stopTrace():
 @app.route("/trace-start", methods=['GET'])
 def startTrace():
     filename = make_pcap_filename()
-    precondition = False
-    while not precondition:
-        r = requests.get("http://localhost:8777/sniff-active")
-        if r.status_code != 200:
-            while r.status_code != 200:
-                r = requests.get("http://localhost:8777/sniff-start")
-                time.sleep(3)
-        else:
-            data = r.json()
-            if data["running"]:
-                precondition = True
-            else:
-                while r.status_code != 200:
-                    r = requests.get("http://localhost:8777/sniff-start")
-                    time.sleep(3)
+    # start sniff process before starting trace
+    # - if there is sniffer already running, this call will restart it
+    r = requests.get("http://localhost:8777/sniff-start")
+    # start the trace
     proc = subprocess.Popen(
         ["tcpdump", "-i", "lo", "-U", "-w", filename, "udp", "port", "4729"],
         stdin=subprocess.DEVNULL,
@@ -169,4 +151,4 @@ def listTraces():
    return {"info": "list of traces", "dir": str(TRACE_DIR), "traces": files}
 
 if __name__ == "__main__":
-   app.run(host="0.0.0.0", port=8777, debug=False)
+   app.run(host="127.0.0.1", port=8777, debug=False)

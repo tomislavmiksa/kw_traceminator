@@ -1,0 +1,16 @@
+[Unit]
+Description=Webapp Service as a frontend for the tool
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/webapp-flask
+Environment=VIRTUAL_ENV=/opt/webapp-flask/.venv
+Environment=PATH=/opt/webapp-flask/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/webapp-flask/.venv/bin/python3 -u /opt/webapp-flask/main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -163,6 +163,37 @@ function installall {
       # show the status of the service
       systemctl status serialsimtrace
    fi
+
+   # WEBAPP SERVICE
+   # ------------------------------------------------------------
+   # if the link already exists, do nothing
+   if [ -d /opt/webapp-flask ]; then
+      echo "Link already exists"
+      systemctl status webinterface
+      exit 0
+   else
+      # create link in opt directory for all the API services
+      cp -R $CURRENT_DIR/src/gui/webapp-flask /opt/webapp-flask
+
+      # create the python virtual environment
+      cd /opt/webapp-flask
+      python3 -m venv .venv
+      source .venv/bin/activate
+      pip install -r requirements.txt
+      deactivate
+
+      # create systemd service for the API service
+      cp $CURRENT_DIR/src/gui/webapp-flask/service/webinterface.service /etc/systemd/system/.
+
+      # reload the systemd daemon
+      systemctl daemon-reload
+      # enable and start the service
+      systemctl enable webinterface
+      systemctl start webinterface
+
+      # show the status of the service
+      systemctl status webinterface
+   fi
 }
 
 function cleanall {
@@ -199,6 +230,15 @@ function cleanall {
    else
       echo -e "\033[31mSerial SIMTRACE2 API service not installed\033[0m"
    fi
+   # WEBAPP SERVICE
+   if [ -d /opt/webapp-flask ]; then
+      rm -rf /opt/webapp-flask
+      systemctl stop webinterface
+      systemctl disable webinterface
+      rm -rf /etc/systemd/system/webinterface.service
+   else
+      echo -e "\033[31mWebapp service not installed\033[0m"
+   fi
    # update systemd daemon
    systemctl daemon-reload
    # show the status of the services
@@ -206,6 +246,7 @@ function cleanall {
    systemctl status qcsuper
    systemctl status serialmodemtrace
    systemctl status serialsimtrace
+   systemctl status webinterface
 }
 
 if [ "$INSTALL" -eq 1 ]; then

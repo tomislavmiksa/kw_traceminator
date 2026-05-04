@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<!--
+  Modem diagnostics & trace-control UI.
+
+  This template is rendered by the Flask app at gui/webapp-flask/main.py and
+  served at "/". All API calls go to same-origin "/api/..." routes that the
+  Flask app proxies to the three backend services:
+      /api/modem            -> serial-at-api          (port 8666)
+      /api/at               -> serial-at-api          (port 8666)
+      /api/qcsuper-active   -> serial-modemtracing    (port 8888)
+      /api/qcsuper-start    -> serial-modemtracing    (port 8888)
+      /api/qcsuper-stop     -> serial-modemtracing    (port 8888)
+      /api/simtracer-active -> serial-simtracing      (port 8777)
+      /api/simtracer-start  -> serial-simtracing      (port 8777)
+      /api/simtracer-stop   -> serial-simtracing      (port 8777)
+
+  Going through the proxy keeps the browser same-origin and avoids CORS.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Modem Info</title>
+
+  <!--
+    All visual styling lives here. Goal is "barely-styled but readable":
+    full-width tables, readable headers, gentle zebra striping, and a
+    minimal tab system. No external CSS file or framework on purpose.
+  -->
+  <style>
+    /* Tables span the parent's width by default; collapse merges adjacent
+       borders so a 1px line drawn on both neighbours becomes one shared 1px
+       line (essential for the "outer border only" look on the log tables). */
+    table  { width: 100%; border-collapse: collapse; }
+
+    /* <th> defaults to centered + bold; we want left-aligned to match the
+       data in the cells below. Bold stays (browser default). */
+    th     { text-align: left; }
+
+    /* Section headings: solid orange band with white text, plus a slightly
+       darker left accent stripe so the section break still has visual
+       emphasis without relying on color alone. Reads like a callout/card
+       header rather than a plain text title -- makes the page sections
+       strongly visible at a glance. */
+    h1 {
+      color: #fff;
+      background: #c2410c;
+      border-left: 6px solid #9a3412;
+      padding: 6px 14px;
+      margin: 1em 0 0.6em 0;
+    }
+
+    /* Zebra striping: light gray on every other body row. tbody-scoped so
+       the <thead> row's index doesn't shift the parity of body rows. */
+    tbody tr:nth-child(even) { background: #f0f0f0; }
+
+    /* Both log tables get a single outer 1px border but no internal cell
+       borders -- log content is multi-line <pre> JSON, so cell borders
+       would just clutter it. */
+    #at-log,
+    #events-log,
+    #batch-results { border: 1px solid #000; }
+
+    /* The Modem information table is a small key/value display, not a wide
+       data grid -- 50% wide keeps it from looking sparse. */
+    #info       { width: 50%; }
+
+    /* table-layout: fixed makes the three columns equal width regardless
+       of content. Without it the SIMtracer2 column would steal space from
+       the shorter QCSuper / QLog columns. */
+    #logs-status { table-layout: fixed; }
+
+    /* Override the global zebra rule for the status table -- the rows have
+       very different content (giant dots vs buttons) and alternating
+       backgrounds make it look noisy. */
+    #logs-status tbody tr:nth-child(even) { background: transparent; }
+
+    /* Transient status lines under headings/buttons (loading, error, idle,
+       last response). Light gray reads as "metadata" and steps back from
+       the primary content. */
+    #status,
+    #at-status,
+    #qcsuper-status,
+    #simtracer-status,
+    #files-status,
+    #batch-status,
+    #batch-run-status { color: #999; }
+
+    /* Batch instruction textarea: full-panel width, monospace so AT commands
+       stay aligned across lines, box-sizing: border-box so width:100% includes
+       padding/border (otherwise it would overflow horizontally). */
+    #batch-text {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: monospace;
+    }
+
+    /* ---------------- tab system (used in two places on the page) ---------------- */
+
+    /* Tab strip: horizontal flex row of buttons sitting on a 1px line.
+       margin-bottom of the buttons negates this 1px, creating the classic
+       "active tab merges with panel below" look. */
+    .tabs { display: flex; border-bottom: 1px solid #999; margin: 12px 0 0 0; }
+
+    .tab-button {
+      flex: 1;                             /* equal width: each button takes 1/N of the .tabs row */
+      text-align: center;                  /* center the label within the now-wider button */
+      padding: 6px 14px;
+      background: transparent;             /* inactive tabs blend with the page */
+      border: 1px solid transparent;       /* placeholder so size doesn't change when border-color appears on .active */
+      border-bottom: none;                 /* no border between tab and panel; we draw it via the .tabs container instead */
+      cursor: pointer;
+      margin-bottom: -1px;                 /* overlap parent's border so the active tab "merges" with the panel */
+      font: inherit;                       /* <button> defaults to OS UI font; this re-uses the page font */
+    }
+    .tab-button.active {
+      background: #c2410c;                 /* matches the orange used on h1 borders/text -- one accent colour across the page */
+      border-color: #c2410c;               /* match border to background; otherwise a gray ring would frame the orange */
+      color: #fff;                         /* white label for AA contrast on this orange */
+      font-weight: bold;
+    }
+    .tab-panel       { display: none; padding: 12px 0; }
+    .tab-panel.active { display: block; }
+
+    /* ---------------- regular buttons ---------------- */
+
+    /* All non-tab buttons share one look: white fill, orange border, orange
+       text, equal min-width so a row of them lines up neatly. The
+       :not(.tab-button) selector keeps the tab strip out of this rule
+       (tabs have their own active/inactive states above). */
+    button:not(.tab-button) {
+      min-width: 110px;             /* uniform width across the page */
+      padding: 8px 16px;            /* a touch bigger than browser default */
+      background: #fff;
+      color: #c2410c;
+      border: 1px solid #c2410c;
+      border-radius: 4px;
+      cursor: pointer;
+      font: inherit;                /* match page font instead of OS UI font */
+    }
+    /* Light orange wash on hover/active, clearly muted look when disabled. */
+    button:not(.tab-button):hover            { background: #fff7ed; }
+    button:not(.tab-button):active           { background: #ffedd5; }
+    button:not(.tab-button):disabled {
+      color: #999;
+      border-color: #ccc;
+      background: #f5f5f5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       SECTION 1: Modem information
+       Static-ish key/value table populated once on page load (and
+       re-loadable via the Refresh button). Source data: /api/modem.
+       ============================================================ -->
+  <h1>Modem information</h1>
+
+  <p>
+    Source: <code>/api/modem</code><br><br>
+    <button id="refresh">Refresh</button>
+  </p>
+  <!-- Status line for loadInfo(): "idle" | "loading..." | "loaded at HH:MM:SS" | "error: ...". -->
+  <p id="status">idle</p>
+
+  <!-- Table is populated by renderTable(). The <tbody> starts empty and
+       loadInfo() injects rows. cellpadding="4" is a legacy HTML attribute
+       kept here only because it works without writing per-cell CSS. -->
+  <table id="info" cellpadding="4">
+    <thead>
+      <tr><th>Property</th><th>Value</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Vestigial debug-view kept around but `hidden`. loadInfo() still fills
+       it with the raw JSON via raw.textContent for quick inspection in
+       devtools without flipping a flag. Remove if you don't use it. -->
+  <h2 hidden>Raw response</h2>
+  <pre hidden id="raw"></pre>
+  <br><br>
+
+
+  <!-- ============================================================
+       SECTION 2: Trace and Logs Management
+       Two-tab UI: "Control" (status dots + start/stop buttons) and
+       "Logs" (chronological events table populated by every Start/
+       Stop click on either qcsuper or simtracer).
+       ============================================================ -->
+  <h1>Trace and Logs Management</h1>
+
+  <!-- A .tab-group is the scoping container for one set of tabs. Multiple
+       groups can coexist on the page; the click handler in JS uses
+       closest(".tab-group") to ensure a click in this group never toggles
+       panels in another group (see SECTION 4). -->
+  <div class="tab-group">
+  <div class="tabs">
+    <button class="tab-button active" data-tab="control">Control</button>
+    <button class="tab-button"        data-tab="logs">Logs</button>
+    <button class="tab-button"        data-tab="log-files">Log Files</button>
+  </div>
+
+  <!-- CONTROL panel: status dots + Start/Stop buttons.
+       The 3-column "logs-status" table has identical structure for each
+       service (QCSuper, QLog, SIMtracer2). QLog buttons stay disabled --
+       its API isn't wired yet. -->
+  <div class="tab-panel active" data-tab-panel="control">
+    <table id="logs-status" cellpadding="4">
+      <thead>
+        <tr>
+          <th>QCSuper</th>
+          <th>QLog</th>
+          <th>SIMtracer2</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- ROW 1: status indicators. The bullet character (&#9679;) is
+             colored dynamically by pollQcsuper / pollSimtracer based on
+             /api/<svc>-active -> {"running": bool}. font-size: 3em is what
+             makes the dots large enough to read from across the room. -->
+        <tr>
+          <td><span id="status-qcsuper"   style="color: gray; font-size: 3em">&#9679;</span></td>
+          <td><span id="status-qlog"      style="color: gray; font-size: 3em">&#9679;</span></td>
+          <td><span id="status-simtracer" style="color: gray; font-size: 3em">&#9679;</span></td>
+        </tr>
+        <!-- ROW 2: Start buttons. Click -> POST /api/<svc>-start via
+             qcsuperAction("start") / simtracerAction("start"). -->
+        <tr>
+          <td><button id="qcsuper-start">Start</button></td>
+          <td><button id="qlog-start"      disabled>Start</button></td>
+          <td><button id="simtracer-start">Start</button></td>
+        </tr>
+        <!-- ROW 3: Stop buttons. Same flow, "stop" verb. -->
+        <tr>
+          <td><button id="qcsuper-stop">Stop</button></td>
+          <td><button id="qlog-stop"      disabled>Stop</button></td>
+          <td><button id="simtracer-stop">Stop</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <!-- Per-service status lines updated by qcsuperAction / simtracerAction.
+         Format: "<svc>: <verb>: HTTP <code> - <body>" or error variant. -->
+    <p id="qcsuper-status">qcsuper: idle</p>
+    <p id="simtracer-status">simtracer: idle</p>
+  </div>
+
+  <!-- LOGS panel: chronological log of every trace start/stop event. Newest
+       row is prepended at the top. Populated by appendEventRow() which is
+       called from both qcsuperAction() and simtracerAction(). -->
+  <div class="tab-panel" data-tab-panel="logs">
+    <table id="events-log" cellpadding="4">
+      <thead>
+        <tr>
+          <th>Sending timestamp</th>
+          <th>Instruction Sent</th>
+          <th>Response timestamp</th>
+          <th>HTTP Status Code</th>
+          <th>Response data</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- LOG FILES panel: lists pcap (and other) files written to disk by the
+       trace services. Refresh button hits /api/trace-files which scans both
+       /opt/serial-{sim,modem}tracing/traces and returns a JSON manifest;
+       each row's Download link points at /api/trace-files/<source>/<name>
+       which streams the file with Content-Disposition: attachment. -->
+  <div class="tab-panel" data-tab-panel="log-files">
+    <p>
+      <button id="files-refresh">Refresh</button>
+    </p>
+    <p id="files-status">idle</p>
+    <table id="files-table" cellpadding="4">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>File</th>
+          <th>Size</th>
+          <th>Modified</th>
+          <th>Download</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  </div>
+
+
+  <!-- ============================================================
+       SECTION 3: Modem Commands
+       Three-tab UI: "Single AT" (live AT command input), "Script"
+       (placeholder for future script-runner), "Logs" (history of
+       AT commands sent + their responses).
+       ============================================================ -->
+  <h1>Modem Commands</h1>
+  <div class="tab-group">
+    <div class="tabs">
+      <button class="tab-button active" data-tab="single-at">Single AT</button>
+      <button class="tab-button"        data-tab="script">Modem Batch Instructions</button>
+      <button class="tab-button"        data-tab="logs">AT Logs</button>
+    </div>
+
+    <!-- SINGLE AT panel: text input + Send button. Pressing Enter in the
+         input field also triggers Send (see keydown handler in script). -->
+    <div class="tab-panel active" data-tab-panel="single-at">
+      <p>
+        <input id="at-cmd" type="text" placeholder="ATI" size="40">
+        <button id="at-send">Send</button>
+      </p>
+      <!-- Last-response status line; format set inside sendAt(). -->
+      <p id="at-status">idle</p>
+    </div>
+
+    <!-- BATCH panel: a script-runner. Each non-blank, non-"#"-prefixed line
+         in the textarea is one statement of the form
+            index:type:cmd:expected_regex:reattempts:if_success:if_failed
+         (only index/type/cmd are mandatory; ":" inside cmd or regex is
+         escaped as "\:"). Click Run -> POST /api/batch/run; results are
+         rendered one row per executed step in #batch-results. -->
+    <div class="tab-panel" data-tab-panel="script">
+      <p>
+        <button id="batch-run">Run</button>
+        <button id="batch-abort" disabled>Abort</button>
+        <span id="batch-status">0 / 250 lines</span>
+        &mdash;
+        <span id="batch-run-status">idle</span>
+      </p>
+      <textarea id="batch-text" rows="15" placeholder="# index:type:cmd:expected_regex:reattempts:if_success:if_failed&#10;# only index/type/cmd are mandatory&#10;10:at:ATI:OK:2::&#10;20:at:AT+CSQ:OK::sleep 1:&#10;30:sh:date::::&#10;40:at:AT+COPS?:,&quot;[^&quot;]+&quot;:3:goto 50:goto 30&#10;50:at:AT&amp;F::::stop"></textarea>
+      <table id="batch-results" cellpadding="4">
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Line</th>
+            <th>Type</th>
+            <th>Command</th>
+            <th>Attempt</th>
+            <th>Result</th>
+            <th>Action</th>
+            <th>ms</th>
+            <th>Output</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- LOGS panel: history of every AT command sent from this page,
+         newest at top. Populated by appendAtRow() called from sendAt(). -->
+    <div class="tab-panel" data-tab-panel="logs">
+      <table id="at-log" cellpadding="4">
+        <thead>
+          <tr>
+            <th>Sending timestamp</th>
+            <th>Command Sent</th>
+            <th>Response timestamp</th>
+            <th>HTTP Status Code</th>
+            <th>Response data</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+
+  <!-- ============================================================
+       SECTION 4: All client-side logic.
+       No build step, no framework, no external scripts. Single inline
+       <script> block that runs after the DOM is parsed (sits at the end
+       of <body>, so document.getElementById calls below are safe).
+       ============================================================ -->
+  <script>
+    /* ---------- shared module-level handles ---------- */
+
+    // Endpoint for the modem-info table. Same-origin proxy -> serial-at-api.
+    const SRC    = "/api/modem";
+    // Cached references; valid because <script> sits at end of <body>, after
+    // all the targets have been parsed into the DOM.
+    const status = document.getElementById("status");
+    const tbody  = document.querySelector("#info tbody");
+    const raw    = document.getElementById("raw");
+
+    /* ---------- modem info loader ---------- */
+
+    // Fetches /api/modem and (re)builds the #info table. Used on initial
+    // page load and whenever the user clicks "Refresh".
+    async function loadInfo() {
+      status.textContent = "loading...";
+      tbody.innerHTML = "";          // clear old rows before re-rendering
+      raw.textContent = "";          // clear hidden debug pane
+      try {
+        // cache: "no-store" prevents the browser from serving a stale copy
+        // -- modem detection state can change while the page is open.
+        const resp = await fetch(SRC, { cache: "no-store" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const data = await resp.json();
+        renderTable(data);
+        raw.textContent = JSON.stringify(data, null, 2);   // hidden but available in devtools
+        status.textContent = "loaded at " + new Date().toLocaleTimeString();
+      } catch (err) {
+        // Single catch handles network errors, non-2xx HTTP, malformed JSON.
+        status.textContent = "error: " + err.message;
+      }
+    }
+
+    /* ---------- shared helpers ---------- */
+
+    // ISO-8601 timestamp with the "T" / "Z" stripped for readability:
+    //   "2026-05-04 07:35:42.123"
+    // Used as both the on-screen "sent at" / "received at" labels and the
+    // request/response timestamps in the log tables.
+    function ts() {
+      return new Date().toISOString().replace("T", " ").replace("Z", "");
+    }
+
+    // Same format as ts(), but for a fixed Unix-epoch millisecond value
+    // (e.g. server-supplied started_at / ended_at on batch steps).
+    function tsFromEpochMs(ms) {
+      if (ms === null || ms === undefined) return "";
+      return new Date(ms).toISOString().replace("T", " ").replace("Z", "");
+    }
+
+    // Render `value` into `cell` as pretty JSON when possible; else raw text.
+    // Wrapped in a <pre> with margin:0 and pre-wrap so the table cell stays tidy.
+    //
+    // The function accepts BOTH already-parsed objects and raw strings so
+    // callers don't have to remember which kind they have:
+    //   - string that happens to be JSON ('{"running":true}') -> pretty-print
+    //   - string that isn't JSON ('+CSQ:18,0;OK')             -> show as-is
+    //   - object passed directly                              -> pretty-print
+    //   - null/undefined                                      -> empty cell
+    function renderResponseCell(cell, value) {
+      let text;
+      if (value === null || value === undefined) {
+        text = "";
+      } else if (typeof value === "string") {
+        try { text = JSON.stringify(JSON.parse(value), null, 2); }
+        catch (e) { text = value; }                      // not JSON -> keep raw string
+      } else {
+        try { text = JSON.stringify(value, null, 2); }
+        catch (e) { text = String(value); }              // circular ref or similar
+      }
+      cell.textContent = "";                             // wipe any prior content
+      const pre = document.createElement("pre");
+      // <pre> defaults: vertical margin (~16px) + white-space: pre (no wrap).
+      // We override both: margin 0 keeps row heights consistent, pre-wrap lets
+      // long JSON wrap inside the cell instead of forcing horizontal scroll.
+      pre.style.margin = "0";
+      pre.style.whiteSpace = "pre-wrap";
+      pre.style.fontFamily = "monospace";                // explicit; survives later swaps to <div>
+      pre.textContent = text;
+      cell.append(pre);
+    }
+
+    /* ---------- AT command log + send ---------- */
+
+    // Prepend one row to the AT command log. Last column (response data) goes
+    // through renderResponseCell for pretty-print. All other cells are plain
+    // text, including the status code column (so "200" and "—" both render as
+    // simple strings).
+    function appendAtRow(sentTs, cmd, recvTs, statusCode, response) {
+      const log = document.querySelector("#at-log tbody");
+      const tr = document.createElement("tr");
+      const values = [sentTs, cmd, recvTs, statusCode, response];
+      for (let i = 0; i < values.length; i++) {
+        const td = document.createElement("td");
+        if (i === values.length - 1) {
+          renderResponseCell(td, values[i]);
+        } else {
+          td.textContent = values[i];
+        }
+        tr.append(td);
+      }
+      log.prepend(tr);   // newest first
+   }
+
+    // POST the contents of #at-cmd to the upstream serial-at-api via the
+    // /api/at proxy, log the round trip, and update #at-status.
+    async function sendAt() {
+      const cmd = document.getElementById("at-cmd").value.trim();
+      const atStatus = document.getElementById("at-status");
+      // Empty input -> guidance, no request fired.
+      if (!cmd) { atStatus.textContent = "enter an AT command first"; return; }
+
+      const sentTs = ts();
+      atStatus.textContent = "sending " + cmd + " ...";
+      try {
+        const r = await fetch("/api/at", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cmd: cmd }),
+        });
+        // r.json() throws if the body isn't valid JSON; that lands in catch.
+        const data = await r.json();
+        const recvTs = ts();
+        // Upstream success returns { "response": "...AT output..." }.
+        // On error it returns whatever JSON shape (e.g. { "error": "..." });
+        // we stringify the whole object in that case so nothing is hidden.
+        const respText = data.response !== undefined
+            ? data.response
+            : JSON.stringify(data);
+        appendAtRow(sentTs, cmd, recvTs, r.status, respText);
+        atStatus.textContent = "HTTP " + r.status + " at " + recvTs + " - " + respText;
+      } catch (err) {
+        // Reached only on network error / DNS failure / unparseable body.
+        // No HTTP status, so log "—" (em-dash) in the code column.
+        const recvTs = ts();
+        appendAtRow(sentTs, cmd, recvTs, "—", "error: " + err.message);
+        atStatus.textContent = "error: " + err.message;
+      }
+    }
+
+    /* ---------- info-table renderer ---------- */
+
+    // Builds rows for #info. "modem" is forced to row 1 (it's the master
+    // identifier). Every other key is rendered in API order. null/undefined
+    // values render as red "(not detected)" so missing interfaces are
+    // visually obvious.
+    function renderTable(data) {
+      // always render "modem" first, then the rest in the order given by the API
+      const keys = Object.keys(data);
+      const ordered = ["modem", ...keys.filter(k => k !== "modem")];
+
+      for (const key of ordered) {
+        if (!(key in data)) continue;                    // "modem" might be absent in some responses
+        const value = data[key];
+        const tr = document.createElement("tr");
+        const k  = document.createElement("td");
+        const v  = document.createElement("td");
+        k.textContent = key;
+        if (value === null || value === undefined) {
+          v.textContent = "(not detected)";
+          v.style.color = "red";
+        } else {
+          v.textContent = String(value);
+        }
+        tr.append(k, v);
+        tbody.append(tr);
+      }
+    }
+
+    /* ---------- QCSuper trace control ---------- */
+
+    // Polls /api/qcsuper-active every 5s (and after every Start/Stop click)
+    // and recolors the status dot:
+    //   green  -> {"running": true}
+    //   red    -> {"running": false}
+    //   gray   -> network error / non-2xx / malformed JSON
+    async function pollQcsuper() {
+      const el = document.getElementById("status-qcsuper");
+      try {
+        const r = await fetch("/api/qcsuper-active", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        // Three-state check intentionally distinguishes "explicitly false"
+        // (red) from "field missing or non-boolean" (gray) -- a malformed
+        // response shouldn't be confused with a real "stopped" state.
+        if (d.running === true)       el.style.color = "green";
+        else if (d.running === false) el.style.color = "red";
+        else                          el.style.color = "gray";
+      } catch (err) {
+        el.style.color = "gray";
+      }
+    }
+
+    // Prepend a row to the events log with the request side filled and the
+    // response cells left as "...". Returns an updater so the caller can fill
+    // them in once the response arrives (or fails).
+    //
+    // Two-stage row creation gives the user instant feedback that a click
+    // registered, even if the upstream takes a few seconds to respond.
+    function appendEventRow(sentTs, instruction) {
+      const log = document.querySelector("#events-log tbody");
+      const tr  = document.createElement("tr");
+      const cells = [];
+      // Five fixed columns: sentTs | instruction | recvTs | status | data
+      for (let i = 0; i < 5; i++) {
+        const td = document.createElement("td");
+        tr.append(td);
+        cells.push(td);
+      }
+      cells[0].textContent = sentTs;
+      cells[1].textContent = instruction;
+      cells[2].textContent = "...";        // placeholders until response arrives
+      cells[3].textContent = "...";
+      cells[4].textContent = "...";
+      log.prepend(tr);
+      // Closure captures `cells`; caller will invoke setResponse exactly once.
+      return {
+        setResponse(recvTs, statusCode, data) {
+          cells[2].textContent = recvTs;
+          cells[3].textContent = statusCode;
+          renderResponseCell(cells[4], data);            // pretty-print JSON if possible
+        },
+      };
+    }
+
+    // Click handler for QCSuper Start/Stop. action is "start" or "stop".
+    // Both buttons are disabled while the request is in flight to prevent
+    // a fast double-click from spawning two qcsuper processes.
+    async function qcsuperAction(action) {
+      // action is "start" or "stop"
+      const startBtn    = document.getElementById("qcsuper-start");
+      const stopBtn     = document.getElementById("qcsuper-stop");
+      const stat        = document.getElementById("qcsuper-status");
+      const instruction = "qcsuper-" + action;
+      const sentTs      = ts();
+
+      startBtn.disabled = true;
+      stopBtn.disabled  = true;
+      stat.textContent  = "qcsuper: " + action + " requested at " + sentTs + " ...";
+      // Phase 1: row appears immediately (with "..." placeholders) so the
+      // user sees the request landed even if the upstream is slow.
+      const row = appendEventRow(sentTs, instruction);
+
+      try {
+        // POST is used (rather than the upstream's GET) to avoid browser
+        // GET caching/prefetch from accidentally starting a trace.
+        const r = await fetch("/api/qcsuper-" + action, { method: "POST" });
+        const text = await r.text();                     // raw body; pretty-print happens in setResponse
+        const recvTs = ts();
+        // Phase 2: row's response cells get filled in.
+        row.setResponse(recvTs, r.status, text);
+        stat.textContent = "qcsuper: " + action + ": HTTP " + r.status + " - " + text;
+      } catch (err) {
+        // Reached only on network error -- proxy 502s arrive as a normal
+        // (non-throwing) Response with .status===502.
+        const recvTs = ts();
+        row.setResponse(recvTs, "\u2014", "error: " + err.message);   // \u2014 = em-dash
+        stat.textContent = "qcsuper: " + action + " error: " + err.message;
+      } finally {
+        startBtn.disabled = false;
+        stopBtn.disabled  = false;
+        pollQcsuper();   // refresh dot immediately, don't wait 5s
+      }
+    }
+
+    /* ---------- SIMtracer2 trace control ----------
+       Mirrors qcsuperAction / pollQcsuper exactly except for the URL
+       fragment, button IDs, status element, and instruction prefix. Kept
+       as a parallel pair (rather than parameterised) for clarity while
+       only two services are wired; collapse into a factory once a third
+       service (e.g. QLog) joins. */
+
+    async function pollSimtracer() {
+      const el = document.getElementById("status-simtracer");
+      try {
+        const r = await fetch("/api/simtracer-active", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.running === true)       el.style.color = "green";
+        else if (d.running === false) el.style.color = "red";
+        else                          el.style.color = "gray";
+      } catch (err) {
+        el.style.color = "gray";
+      }
+    }
+
+    async function simtracerAction(action) {
+      // action is "start" or "stop"
+      const startBtn    = document.getElementById("simtracer-start");
+      const stopBtn     = document.getElementById("simtracer-stop");
+      const stat        = document.getElementById("simtracer-status");
+      const instruction = "simtracer-" + action;
+      const sentTs      = ts();
+
+      startBtn.disabled = true;
+      stopBtn.disabled  = true;
+      stat.textContent  = "simtracer: " + action + " requested at " + sentTs + " ...";
+      const row = appendEventRow(sentTs, instruction);
+
+      try {
+        const r = await fetch("/api/simtracer-" + action, { method: "POST" });
+        const text = await r.text();
+        const recvTs = ts();
+        row.setResponse(recvTs, r.status, text);
+        stat.textContent = "simtracer: " + action + ": HTTP " + r.status + " - " + text;
+      } catch (err) {
+        const recvTs = ts();
+        row.setResponse(recvTs, "\u2014", "error: " + err.message);
+        stat.textContent = "simtracer: " + action + " error: " + err.message;
+      } finally {
+        startBtn.disabled = false;
+        stopBtn.disabled  = false;
+        pollSimtracer();   // refresh dot immediately, don't wait 5s
+      }
+    }
+
+    /* ---------- trace files (Log Files tab) ---------- */
+
+    // Format a byte count as "12.3 MB" / "456 KB" / "789 B".
+    // Uses 1024-based units; switches to one decimal place above 1 KB so
+    // "1.5 KB" is clearer than "1535 B" but "0 B" stays integer.
+    function humanSize(n) {
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return n.toFixed(i === 0 ? 0 : 1) + " " + units[i];
+    }
+
+    // Fetch the manifest and render one row per file. Each row's Download
+    // cell contains a <a download> pointing at the per-file streaming URL.
+    // The server forces Content-Disposition: attachment so click -> save,
+    // not navigate.
+    async function loadTraceFiles() {
+      const fstatus = document.getElementById("files-status");
+      const ftbody  = document.querySelector("#files-table tbody");
+      fstatus.textContent = "loading...";
+      ftbody.innerHTML = "";
+      try {
+        const r = await fetch("/api/trace-files", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const files = await r.json();
+        if (!Array.isArray(files) || files.length === 0) {
+          fstatus.textContent = "no files found at " + new Date().toLocaleTimeString();
+          return;
+        }
+        for (const f of files) {
+          const tr = document.createElement("tr");
+          const sourceTd = document.createElement("td");
+          const nameTd   = document.createElement("td");
+          const sizeTd   = document.createElement("td");
+          const mtimeTd  = document.createElement("td");
+          const dlTd     = document.createElement("td");
+          sourceTd.textContent = f.source;
+          nameTd.textContent   = f.name;
+          sizeTd.textContent   = humanSize(f.size);
+          // Server returns mtime as Unix seconds; multiply for JS Date ms.
+          mtimeTd.textContent  = new Date(f.mtime * 1000).toLocaleString();
+          const a = document.createElement("a");
+          a.href      = f.url;
+          a.textContent = "Download";
+          // `download` attribute is a browser hint to use this filename
+          // when saving; works because the request is same-origin.
+          a.download  = f.name;
+          dlTd.append(a);
+          tr.append(sourceTd, nameTd, sizeTd, mtimeTd, dlTd);
+          ftbody.append(tr);
+        }
+        fstatus.textContent = "loaded " + files.length + " file(s) at " +
+                              new Date().toLocaleTimeString();
+      } catch (err) {
+        fstatus.textContent = "error: " + err.message;
+      }
+    }
+
+    /* ---------- batch instructions textarea ---------- */
+
+    // Hard cap on number of newline-separated lines in #batch-text. Anything
+    // pasted/typed beyond this is silently truncated to the first MAX_BATCH_LINES
+    // lines. The status line below the textarea always reports current/max.
+    const MAX_BATCH_LINES = 250;
+
+    // Initial visible height of #batch-text in rows. The textarea grows
+    // dynamically to fit content beyond this (capped at MAX_BATCH_LINES);
+    // it never shrinks below the initial size, so a freshly-cleared
+    // textarea still shows a comfortable working area.
+    const MIN_BATCH_ROWS = 15;
+
+    // Recompute and render the "<n> / <max> lines" counter. Empty textarea is
+    // 0 lines (split("\n") of "" returns [""] which is length 1 -- handled
+    // explicitly so the counter starts at 0 instead of 1).
+    function updateBatchStatus() {
+      const t = document.getElementById("batch-text");
+      const lines = t.value === "" ? 0 : t.value.split("\n").length;
+      document.getElementById("batch-status").textContent =
+        lines + " / " + MAX_BATCH_LINES + " lines";
+    }
+
+    // Resize #batch-text to fit its content. Grows from MIN_BATCH_ROWS up
+    // to MAX_BATCH_LINES rows (the same cap the input handler enforces on
+    // value), so the user never has to scroll inside a small box AND the
+    // table stays at a sensible distance below.
+    function autosizeBatchTextarea() {
+      const t = document.getElementById("batch-text");
+      const lines = t.value === "" ? 1 : t.value.split("\n").length;
+      // +1 spare row so the user has somewhere to type next; clamped at
+      // both ends.
+      const rows = Math.min(MAX_BATCH_LINES, Math.max(MIN_BATCH_ROWS, lines + 1));
+      t.rows = rows;
+    }
+
+    /* ---------- batch script runner ---------- */
+
+    // Build one results-table row per attempt. Retries each get their own
+    // row, so the table is a complete log of every command actually run
+    // (not just the final outcome). The action column is filled in only
+    // on the final attempt of a step (success or last retry); intermediate
+    // failed attempts leave it blank.
+    function appendAttemptRow(ev) {
+      const tbody = document.querySelector("#batch-results tbody");
+      const tr = document.createElement("tr");
+
+      // The server flags the final attempt by attaching `action`. We use
+      // its presence (not a separate flag) to decide how to render.
+      const isFinal = ev.action !== undefined;
+
+      // Action label combines verb + resolved next index (where applicable).
+      // Empty for intermediate retry rows.
+      let actionLabel = "";
+      if (isFinal) {
+        actionLabel = ev.action || "next";
+        if (ev.next_index !== null && ev.next_index !== undefined &&
+            (ev.action === "next" || ev.action.startsWith("sleep"))) {
+          actionLabel += " \u2192 " + ev.next_index;
+        }
+      }
+      // Attempt column: "2 / 3" means this is the 2nd of up to 3 tries.
+      const attempt = ev.attempt + " / " + ev.max_attempts;
+      // Per-attempt verdict: did *this* try match the regex / exec OK?
+      const verdict = ev.matched ? "\u2713" : "\u2717";
+
+      const cells = [
+        ev.step,
+        ev.index,
+        ev.type,
+        ev.cmd,
+        attempt,
+        verdict,
+        actionLabel,
+        ev.duration_ms,
+      ];
+      for (const c of cells) {
+        const td = document.createElement("td");
+        td.textContent = c === undefined || c === null ? "" : c;
+        tr.append(td);
+      }
+      // Output column: pretty-print JSON if it parses, else raw text.
+      const outTd = document.createElement("td");
+      renderResponseCell(outTd, ev.output);
+      tr.append(outTd);
+
+      // Color the verdict cell green/red so the table scans easily.
+      tr.children[5].style.color = ev.matched ? "green" : "red";
+      tr.children[5].style.fontWeight = "bold";
+
+      tbody.append(tr);
+    }
+
+    // Render one streamed event into #batch-results and (for AT) #at-log.
+    // Synthetic error events -- emitted when the executor bails out
+    // (max-iterations, goto target missing) -- collapse into a single
+    // colspan row so they're impossible to miss.
+    function processBatchEvent(ev) {
+      if (ev.kind === "error" || ev.error) {
+        const tbody = document.querySelector("#batch-results tbody");
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 9;
+        td.style.color = "red";
+        td.textContent = "step " + ev.step + ": " + ev.error;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+      // Default: an "attempt" event (one per executed try).
+      appendAttemptRow(ev);
+      // Mirror every batch attempt -- AT and sh both -- into the AT
+      // command log so it doubles as a unified history of every command
+      // ever issued on the page (single sends + batch sends + every
+      // retry). Timestamps come from the server.
+      //
+      // For sh, http_status is null (no HTTP round-trip happened), so we
+      // tag the row with "sh ok" / "sh err" derived from `matched` to
+      // give the column a meaningful value instead of an em-dash. The
+      // command text is prefixed with "[sh] " so AT vs sh is obvious at
+      // a glance even though they share the table.
+      const isAt    = ev.type === "at";
+      const cmdText = isAt ? ev.cmd : ("[sh] " + ev.cmd);
+      let httpCode;
+      if (isAt) {
+        httpCode = (ev.http_status !== null && ev.http_status !== undefined)
+          ? ev.http_status
+          : (ev.matched ? 200 : "\u2014");
+      } else {
+        httpCode = ev.matched ? "sh ok" : "sh err";
+      }
+      appendAtRow(
+        tsFromEpochMs(ev.started_at),
+        cmdText,
+        tsFromEpochMs(ev.ended_at),
+        httpCode,
+        ev.output
+      );
+    }
+
+    // POST the textarea to /api/batch/run and consume the streamed NDJSON
+    // response one line at a time. Each completed line is a step; we render
+    // it immediately so the UI updates while the script is still running
+    // (sleeps and slow modems no longer "freeze" the table).
+    //
+    // The endpoint streams `application/x-ndjson` (one JSON doc per line);
+    // we read response.body as a ReadableStream, decode UTF-8 in chunks,
+    // and split on "\n". Any partial line at the end of a chunk is kept in
+    // a buffer and joined with the next chunk.
+    async function runBatch() {
+      const text     = document.getElementById("batch-text").value;
+      const runBtn   = document.getElementById("batch-run");
+      const abortBtn = document.getElementById("batch-abort");
+      const statusEl = document.getElementById("batch-run-status");
+      const tbody    = document.querySelector("#batch-results tbody");
+
+      if (!text.trim()) {
+        statusEl.textContent = "empty script";
+        return;
+      }
+      // Run/Abort are mirror buttons: only one is enabled at a time.
+      runBtn.disabled   = true;
+      abortBtn.disabled = false;
+      statusEl.textContent = "running...";
+      tbody.innerHTML = "";        // clear prior run
+
+      const t0 = performance.now();
+      try {
+        const r = await fetch("/api/batch/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script: text }),
+        });
+        if (!r.ok) {
+          // Pre-stream errors (parse failure, empty script, "another batch
+          // is already running") come back as a regular JSON 4xx response;
+          // surface the message and bail.
+          let msg = "HTTP " + r.status;
+          try {
+            const data = await r.json();
+            if (data && data.error) msg = data.error;
+          } catch (e) { /* keep generic */ }
+          statusEl.textContent = "error: " + msg;
+          return;
+        }
+
+        const reader   = r.body.getReader();
+        const decoder  = new TextDecoder("utf-8");
+        let buffer     = "";
+        let attemptCnt = 0;       // total attempts streamed (incl. retries)
+        let stepCnt    = 0;       // distinct steps (one per final attempt)
+        let allOk      = true;
+        let aborted    = false;   // user clicked Abort and the server honoured it
+
+        // Process one NDJSON line: parse, render, update status counter.
+        // Each "attempt" event with action info attached marks the end of
+        // a step; we tally those separately so the user sees both
+        // "running... (5 attempt(s) over 3 step(s))".
+        const handleLine = (line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          let ev;
+          try { ev = JSON.parse(trimmed); }
+          catch (e) { return; }            // ignore garbage; never throw mid-stream
+          processBatchEvent(ev);
+          if (ev.kind === "aborted") {
+            aborted = true;
+          } else if (ev.kind === "error" || ev.error) {
+            allOk = false;
+          } else {
+            attemptCnt += 1;
+            // Step-final events carry `action`; intermediate retries don't.
+            if (ev.action !== undefined) {
+              stepCnt += 1;
+              if (ev.success === false) allOk = false;
+            }
+          }
+          statusEl.textContent = "running... (" + attemptCnt + " attempt" +
+                                 (attemptCnt === 1 ? "" : "s") + " over " +
+                                 stepCnt + " step" +
+                                 (stepCnt === 1 ? "" : "s") + ")";
+        };
+
+        // Pump until the server closes the stream.
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            handleLine(buffer.slice(0, nl));
+            buffer = buffer.slice(nl + 1);
+          }
+        }
+        // Flush a trailing line without a newline (defensive; the server
+        // always adds "\n" but if it ever stops doing so this still works).
+        if (buffer.trim()) handleLine(buffer);
+
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+        const verdict = aborted ? "aborted"
+                                : (allOk ? "all OK" : "some failed");
+        statusEl.textContent = "done: " + attemptCnt + " attempt(s) over " +
+                               stepCnt + " step(s) in " + elapsed + "s, " +
+                               verdict;
+      } catch (err) {
+        statusEl.textContent = "error: " + err.message;
+      } finally {
+        runBtn.disabled   = false;
+        abortBtn.disabled = true;
+      }
+    }
+
+    // Tell the server to stop the running script. Buttons stay in "abort
+    // pending" state until the stream actually ends (which runBatch's
+    // finally clause handles), so the user gets unambiguous feedback that
+    // the request was sent even if the current command takes a moment to
+    // wind down.
+    async function abortBatch() {
+      const abortBtn = document.getElementById("batch-abort");
+      const statusEl = document.getElementById("batch-run-status");
+      abortBtn.disabled = true;
+      statusEl.textContent = "aborting...";
+      try {
+        await fetch("/api/batch/abort", { method: "POST" });
+      } catch (err) {
+        // Even if the abort POST itself fails, the server may still
+        // notice the client disconnect and stop. Best-effort only.
+        statusEl.textContent = "abort error: " + err.message;
+      }
+    }
+
+    /* ---------- DOM wiring + boot ---------- */
+
+    // One-shot button listeners: refresh modem info, send AT command,
+    // refresh the trace-file list.
+    document.getElementById("refresh")      .addEventListener("click", loadInfo);
+    document.getElementById("at-send")      .addEventListener("click", sendAt);
+    document.getElementById("files-refresh").addEventListener("click", loadTraceFiles);
+
+    // Batch textarea: enforce the line cap on every input event (covers
+    // typing, pasting, drag-drop, and IME composition end). Truncate first,
+    // update counter second, autosize last -- so the user always sees the
+    // post-clamp count and the textarea grows to fit what's actually there.
+    const batchTextarea = document.getElementById("batch-text");
+    batchTextarea.addEventListener("input", () => {
+      const lines = batchTextarea.value.split("\n");
+      if (lines.length > MAX_BATCH_LINES) {
+        batchTextarea.value = lines.slice(0, MAX_BATCH_LINES).join("\n");
+      }
+      updateBatchStatus();
+      autosizeBatchTextarea();
+    });
+    updateBatchStatus();        // initial render so the counter shows "0 / 250" on load
+    autosizeBatchTextarea();    // collapse to MIN_BATCH_ROWS on load (and grow if pre-filled)
+
+    // Run button -> POST script, render results.
+    document.getElementById("batch-run")  .addEventListener("click", runBatch);
+    document.getElementById("batch-abort").addEventListener("click", abortBatch);
+    // Quality-of-life: pressing Enter inside the AT input triggers Send.
+    document.getElementById("at-cmd").addEventListener("keydown", e => {
+      if (e.key === "Enter") sendAt();
+    });
+
+    // Generic tabs scoped to their own .tab-group so multiple groups on the
+    // same page (e.g. "Trace and Logs Management" + "Single AT Command") don't
+    // toggle each other -- a click only affects buttons/panels in the same group.
+    document.querySelectorAll(".tab-button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const group  = btn.closest(".tab-group");
+        const target = btn.dataset.tab;
+        // classList.toggle(name, condition) sets the class iff condition is true.
+        // This is the cleanest "exactly one active button / panel" idiom.
+        group.querySelectorAll(".tab-button").forEach(b =>
+          b.classList.toggle("active", b === btn));
+        group.querySelectorAll(".tab-panel").forEach(p =>
+          p.classList.toggle("active", p.dataset.tabPanel === target));
+      });
+    });
+
+    // Trace-control button listeners. Arrow wrappers needed because we want
+    // qcsuperAction to be CALLED with a string, not registered as a handler
+    // that receives the Event object.
+    document.getElementById("qcsuper-start")  .addEventListener("click", () => qcsuperAction("start"));
+    document.getElementById("qcsuper-stop")   .addEventListener("click", () => qcsuperAction("stop"));
+    document.getElementById("simtracer-start").addEventListener("click", () => simtracerAction("start"));
+    document.getElementById("simtracer-stop") .addEventListener("click", () => simtracerAction("stop"));
+
+    // Boot sequence: paint the page, then start two independent 5s polls
+    // for the trace-control status dots. Independent intervals mean a hung
+    // upstream for one service can't delay the other's poll.
+    loadInfo();
+    pollQcsuper();
+    pollSimtracer();
+    setInterval(pollQcsuper,   5000);
+    setInterval(pollSimtracer, 5000);
+  </script>
+</body>
+</html>
