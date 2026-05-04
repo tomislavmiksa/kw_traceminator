@@ -41,6 +41,30 @@ After logged in, the WebApp shall present a simple WebGUI with:
 	          ![](attachments/Pasted%20image%2020260504100107.png)
 		- is an interface to download the collected logs and traces locally
 - Modem Commands
+	- the GUI interface executing interactions with the mocem via serial AT
+	- **Single AT**
+	          ![](attachments/Pasted%20image%2020260504100416.png)
+		- interface to run a single AT command on the modem
+	- **Modem Batch Instructions**
+	          ![](attachments/Pasted%20image%2020260504101139.png)
+		- interface to run a script, combination of the AT commands (on the modem) as well as shell commands (on the RasPi)
+		- read separate section about the implemented syntax
+		- useful for running measurements over long period of time as supports looping and conditional statements
+	- **AT Logs**
+	         ![](attachments/Pasted%20image%2020260504101205.png)
+		- log table of all commands execued with modem and RasPi
+
+## Modem Batch Syntax
+
+| Field            | Mandatory | Description                                                                            |
+| ---------------- | --------- | -------------------------------------------------------------------------------------- |
+| `index`          | yes       | int. Like BASIC line numbers (`10`, `20`, ...). Used as `goto` target. Must be unique. |
+| `type`           | yes       | `at` (modem command via `/api/at`) or `sh` (shell command via `subprocess.run`).       |
+| `cmd`            | yes       | The command itself.                                                                    |
+| `expected_regex` | no        | If set, success = `re.search(regex, output)`. If empty, success = HTTP 200 / exit 0.   |
+| `reattempts`     | no        | Extra retries on failure (default 0). Total tries = `1 + reattempts`.                  |
+| `if_success`     | no        | Flow action on success. `""`/`next` (default), `goto N`, `sleep N`, `stop`.            |
+| `if_failed`      | no        | Same vocabulary as `if_success`; runs when all retries are exhausted without matching. |
 
 # Architecture
 
