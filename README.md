@@ -19,6 +19,29 @@ you:
 Everything runs locally on the Pi, behind one orange-themed page at
 `http://<pi>:9000`.
 
+# Walkthrough
+
+After the successful installation, connect to a WebApp on any of the RasPi IP-s. It runs on the port 9000.
+
+After logged in, the WebApp shall present a simple WebGUI with:
+- **Modem Information**
+          ![](attachments/Pasted%20image%2020260504095702.png)
+	- modem information must load, else all is in vain and application itself makes no sense 
+	- modem and modem interfaces shall be automatically detected
+- **Trace and Logs Management**
+	- **Control**
+	          ![](attachments/Pasted%20image%2020260504100007.png)
+		- is an interface to control the Tracing and Log collection tools
+		- at the moment QCSuper and Simtrase via Sysmocom Simtrace2 supported
+		- by clicking Start and Stop button you start or terminate the traces collection
+	- **Logs**
+	          ![](attachments/Pasted%20image%2020260504100031.png)
+		- contains the information about all logging attempts
+	- **Log Files**
+	          ![](attachments/Pasted%20image%2020260504100107.png)
+		- is an interface to download the collected logs and traces locally
+- Modem Commands
+
 # Architecture
 
 ```
@@ -72,13 +95,14 @@ External binaries pulled in by the installer:
 
 # Hardware
 
-Tested on a **Raspberry Pi running Debian 13 (Bookworm/Trixie)** with:
+Tested on a **Raspberry Pi 5 with 8GB or RAM running Debian 13 (Bookworm/Trixie)** with:
 
-- **Quectel EC25** USB modem (any `EC25-*` variant). The AT and Diag
+- **[Quectel EC25](https://www.quectel.com/product/lte-ec25-mini-pcie-series/)** modem (any `EC25-*` variant). The AT and Diag
   serial nodes are mapped via `udev`-stable paths (see
   `src/code/serial-at-api/modules/data/modem.json` for the interface
-  index → role mapping).
-- **Osmocom SIMtrace2** USB device for SIM-side capture (optional;
+  index → role mapping). 
+- The modem was connected to RasPi via the **[LTE Hat from Sixfab](https://sixfab.com/product/raspberry-pi-base-hat-3g-4g-lte-minipcie-cards/?srsltid=AfmBOopjMbo1sII3IzJqDuX9xgrr7PmO8YUcu7Z7fgfbVAe8KM7sxNPp)**
+- **[Osmocom SIMtrace2](https://osmocom.org/projects/simtrace2/wiki)** USB device for SIM-side capture (optional;
   modem-only setups can ignore the simtracing service).
 
 Other Qualcomm-based USB modems should work for the QCSuper part as long
@@ -229,6 +253,14 @@ For component-specific failures, see each component's own README:
 - [serial-modemtracing](src/code/serial-modemtracing/README.md)
 - [serial-simtracing](src/code/serial-simtracing/README.md)
 - [webapp-flask](src/gui/webapp-flask/README.md)
+
+# Changelog
+
+
+| Date       | Version | Author                            | Description     |
+| ---------- | ------- | --------------------------------- | --------------- |
+| 2026-05-04 | 1.0.0   | Tomislav Miksa <tmiksa@zgmc.info> | Initial Version |
+
 
 # License
 
