@@ -1,8 +1,13 @@
 # kw_traceminator
 
 A self-contained modem diagnostic and trace-capture toolchain for a
-Raspberry Pi connected to a **Quectel EC25** USB modem and (optionally)
-an **Osmocom SIMtrace2** USB device.
+Raspberry Pi connected to a 
+- **Quectel EC25** modem 
+- **Quectel BG96** modem
+and (optionally) an **Osmocom SIMtrace2** USB device.
+
+The measurement system finally looks like
+![](attachments/Pasted%20image%2020260506102538.png)
 
 The project bundles four small services and a web UI that, together, let
 you:
@@ -18,6 +23,8 @@ you:
 
 Everything runs locally on the Pi, behind one orange-themed page at
 `http://<pi>:9000`.
+
+As all the tools and publically available under the Opensource license, this product just assembles them and provides and User Interface for easier management and log collection. It is licensed under MIT license, therefore feel free to use it as you wish. 
 
 # Walkthrough
 
@@ -205,6 +212,12 @@ sudo ./install.sh -i
 
 # 4. open the UI from any host that can reach the Pi
 xdg-open http://localhost:9000        # or http://<pi-ip>:9000
+
+# 5. RasPi OS should automatically detect and map the modem and SIMtrace V2 in RasPi
+miksato@raspi-03:~/kw_traceminator $ lsusb
+...
+Bus 003 Device 006: ID 1d50:60e3 OpenMoko, Inc. Osmocom SIMtrace 2
+Bus 003 Device 014: ID 2c7c:0296 Quectel Wireless Solutions Co., Ltd. BG96 CAT-M1/NB-IoT modem
 ```
 
 The UI surfaces:
