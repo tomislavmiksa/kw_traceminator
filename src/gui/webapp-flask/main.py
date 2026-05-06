@@ -1,5 +1,6 @@
 import json
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -12,6 +13,27 @@ from flask import Flask, render_template, jsonify, request, send_from_directory,
 AT_API_BASE         = "http://localhost:8666"
 MODEMTRACE_API_BASE = "http://localhost:8888"   # qcsuper trace API
 SIMTRACER_API_BASE  = "http://localhost:8777"   # simtrace2 trace API
+
+# Services exposed by the "Restart Service" buttons in the page banner.
+# Each entry is { systemd unit -> TCP port we expect to be listening once
+# the unit is back up }. The endpoint runs `systemctl restart <unit>` then
+# polls 127.0.0.1:<port> until it accepts a connection (or we time out).
+# Keys here are the values the frontend POSTs; ports must match the upstream
+# bases above so the restart actually validates the same service the rest of
+# the UI talks to.
+RESTART_SERVICES = {
+    "serialmodem": {"unit": "serialmodeminterface", "port": 8666, "label": "Serial Modem"},
+    "qcsuper":     {"unit": "serialmodemtrace",     "port": 8888, "label": "QCSuper Service"},
+    "simtracer":   {"unit": "serialsimtrace",       "port": 8777, "label": "Simtracer Service"},
+}
+
+# How long to wait, total, for the TCP port to come back after the
+# `systemctl restart` returns. Restart itself is bounded separately by
+# RESTART_SYSTEMCTL_TIMEOUT below. Tuned generously: serial services can
+# take a few seconds to re-open their listening socket.
+PORT_WAIT_SECONDS        = 15
+PORT_POLL_INTERVAL       = 0.3
+RESTART_SYSTEMCTL_TIMEOUT = 30
 
 # trace files written by the two background services. Keys appear in the URL
 # (/api/trace-files/<source>/<filename>) and as the "Source" column in the UI.
@@ -102,6 +124,82 @@ def simtracer_stop():
     except requests.RequestException as e:
         return jsonify(error=f"could not reach {SIMTRACER_API_BASE}: {e}"), 502
     return (r.text, r.status_code, {"Content-Type": "application/json"})
+
+
+def _wait_for_port(host, port, deadline):
+    """Poll a TCP port until it accepts a connection or `deadline` passes.
+    Returns (listening: bool, last_error: str|None). Short per-attempt
+    timeouts so we react quickly to the service coming up; the outer
+    deadline bounds total wall time."""
+    last_err = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True, None
+        except OSError as e:
+            last_err = str(e)
+            # Sleep, but never past the deadline (avoids a final useless wait).
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(PORT_POLL_INTERVAL, remaining))
+    return False, last_err
+
+
+# Restart a systemd unit (serialmodeminterface / serialmodemtrace /
+# serialsimtrace) and verify its TCP port is listening afterwards. Wired
+# to the three buttons in the page banner. Note: the Flask process must
+# have permission to run `systemctl restart <unit>` non-interactively
+# (typically via a polkit rule or running as root); a sudo-less failure
+# surfaces as restart_ok=false with the systemctl stderr in
+# restart_output, so the UI can show the operator why it failed.
+@app.route("/api/restart-service", methods=["POST"])
+def restart_service():
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("service")
+    cfg = RESTART_SERVICES.get(name)
+    if cfg is None:
+        return jsonify(error=f"unknown service: {name!r}",
+                       known=sorted(RESTART_SERVICES.keys())), 400
+
+    cmd = ["systemctl", "restart", cfg["unit"]]
+    started_at = time.time()
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=RESTART_SYSTEMCTL_TIMEOUT)
+        restart_ok      = r.returncode == 0
+        restart_output  = ((r.stdout or "") + (r.stderr or "")).strip()
+        restart_rc      = r.returncode
+    except subprocess.TimeoutExpired:
+        restart_ok      = False
+        restart_output  = f"systemctl restart {cfg['unit']} timed out after {RESTART_SYSTEMCTL_TIMEOUT}s"
+        restart_rc      = None
+    except FileNotFoundError as e:
+        # systemctl missing entirely (e.g. running on a non-systemd dev box)
+        return jsonify(ok=False, error=f"systemctl not available: {e}"), 500
+
+    # Even if `systemctl restart` reported failure, still poll the port
+    # briefly: the unit may already have been up, or the restart may have
+    # succeeded despite a non-zero rc (rare but observed with units that
+    # exit cleanly during their stop phase). We just narrow the window.
+    deadline = time.monotonic() + (PORT_WAIT_SECONDS if restart_ok else 3)
+    port_listening, port_error = _wait_for_port("127.0.0.1", cfg["port"], deadline)
+
+    overall_ok = restart_ok and port_listening
+    body = {
+        "ok":              overall_ok,
+        "service":         name,
+        "label":           cfg["label"],
+        "unit":            cfg["unit"],
+        "port":            cfg["port"],
+        "restart_ok":      restart_ok,
+        "restart_rc":      restart_rc,
+        "restart_output":  restart_output,
+        "port_listening":  port_listening,
+        "port_error":      None if port_listening else port_error,
+        "elapsed_s":       round(time.time() - started_at, 2),
+    }
+    return jsonify(body), (200 if overall_ok else 500)
 
 # list every regular file in either trace directory.
 # returns [{source, name, size, mtime, url}, ...] sorted by source then name.
