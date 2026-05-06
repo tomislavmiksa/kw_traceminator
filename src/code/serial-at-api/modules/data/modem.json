@@ -7,5 +7,13 @@
                 "Modem" : "if03",
                 "NDIS"  : "if04"
             }
+    },
+    {
+        "BG96": {
+                "Diag"  : "if00",
+                "NMEA"  : "if01",
+                "AT"    : "if02",
+                "Modem" : "if03"
+            }
     }
 ]
