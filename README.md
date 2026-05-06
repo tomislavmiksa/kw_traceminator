@@ -66,6 +66,42 @@ After logged in, the WebApp shall present a simple WebGUI with:
 | `if_success`     | no        | Flow action on success. `""`/`next` (default), `goto N`, `sleep N`, `stop`.            |
 | `if_failed`      | no        | Same vocabulary as `if_success`; runs when all retries are exhausted without matching. |
 
+### Example 1: SIM available?
+
+- the script below shall
+	- reboot the modem
+	- sleep 60 seconds until the modem boot is over
+	- verify if AT interface is responsive
+	- 3 times try to get answer for the AT+CPIN? to make shore the SIM is inserted and ready; if failes 4 consecutive times, we shall reboot the modem again
+
+```
+1:at:AT+CFUN=1,1:OK::
+2:sh:sleep 60:::
+10:sh:date:::
+20:at:AT:OK:5::
+30:at:AT+CPIN?:READY:3::goto 1
+```
+
+- with expected output as
+![](attachments/Pasted%20image%2020260506094209.png)
+
+### Example 2: Attach?
+
+- the script below shall
+	- list the ICCID and IMSI of the SIM card
+	- verify the 
+
+```
+40:at:AT+QCCID:::
+50:at:AT+CIMI:::
+60:at:AT+COPS?:OK::
+70:at:AT+QENG="servingcell":::
+80:at:AT+CGDCONT?:::
+90:at:AT+CREG?:0,(1|5):20::goto 40
+```
+
+- with the expected output as
+![](attachments/Pasted%20image%2020260506094316.png)
 # Architecture
 
 ```
