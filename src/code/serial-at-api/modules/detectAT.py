@@ -35,7 +35,7 @@ def getModemType(modems) -> tuple:
 def getModemInterfaces(interface):
    # GET the modems connected to the system
    result = subprocess.run(
-      f"ls -l /dev/serial/by-id/ | grep -e Android -e Qualcomm| grep {interface} | cut -f 11 | cut -d '/' -f 3",
+      f"ls -l /dev/serial/by-id/ | grep -e Android -e Qualcomm -e Quectel| grep {interface} | cut -f 11 | cut -d '/' -f 3",
       shell=True,
       capture_output=True,
       text=True,
