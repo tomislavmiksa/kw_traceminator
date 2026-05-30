@@ -1,8 +1,8 @@
 # Introduction
 
-This module is the **single-page web frontend** for the modem diagnostic
-toolchain. It serves a static HTML/JS UI and a thin same-origin JSON proxy
-in front of the three backend APIs that do the real work:
+This module is the **TRACEMINATOR** single-page web frontend for the modem
+diagnostic toolchain. It serves a static HTML/JS UI and a thin same-origin JSON
+proxy in front of the three backend APIs that do the real work:
 
 - `serial-at-api`        on `http://localhost:8666` - modem info + AT commands
 - `serial-modemtracing`  on `http://localhost:8888` - QCSuper modem trace
@@ -72,17 +72,23 @@ sudo journalctl -u webinterface -f
 
 # UI tour
 
+The page title is **TRACEMINATOR**. Orange styling (`#c2410c`) is used for
+section headings, buttons, the top header, and the footer. The header shows
+the Pi hostname and CPU architecture on the left and a "Powered by" link on
+the right. The footer lists contact details (address aligned right) with an
+orange delimiter line above it.
+
 The page is divided into four `<h1>` sections:
 
 | Section                       | What it does                                                                                |
 |-------------------------------|---------------------------------------------------------------------------------------------|
-| **Modem Information**         | One-shot read of `/api/modem` -> table of detected interfaces (red row when not detected). |
-| **Trace and Logs Management** | QCSuper and SIMtracer2 status dots, Start/Stop buttons, event log, Log Files browser.       |
-| **Modem Commands**            | Single AT command sender, Modem Batch Instructions script runner, AT Logs (history).        |
+| **Modem Information**         | Table of detected modem interfaces (red row when not detected). **Restart Service** buttons run `systemctl restart` on each backend unit and wait for its TCP port. |
+| **Trace and Logs Management** | QCSuper, QLog, and SIMtracer2 status dots, Start/Stop buttons, event log, Log Files browser (download + delete). |
+| **Modem Commands**            | Single AT command sender and **Modem Batch Instructions** script runner with live streamed results. |
 
-The status dots poll the corresponding `/trace-active` endpoint every 5s
-and turn red/green/gray; the event log records every Start/Stop click with
-timestamps and the raw JSON response.
+The status dots poll the corresponding `*-active` endpoint every 5s and turn
+red/green/gray; the event log records every Start/Stop click with timestamps
+and the raw JSON response.
 
 # API endpoints (server side)
 
@@ -109,16 +115,38 @@ upstream is unreachable.
 | GET         | `/api/qcsuper-active`    | `GET  http://localhost:8888/trace-active`    |
 | GET / POST  | `/api/qcsuper-start`     | `GET  http://localhost:8888/trace-start`     |
 | GET / POST  | `/api/qcsuper-stop`      | `GET  http://localhost:8888/trace-stop`      |
+| GET         | `/api/qlog-active`       | `GET  http://localhost:8888/qlog-active`       |
+| GET / POST  | `/api/qlog-start`        | `GET  http://localhost:8888/qlog-start`        |
+| GET / POST  | `/api/qlog-stop`         | `GET  http://localhost:8888/qlog-stop`         |
 | GET         | `/api/simtracer-active`  | `GET  http://localhost:8777/trace-active`    |
 | GET / POST  | `/api/simtracer-start`   | `GET  http://localhost:8777/trace-start`     |
 | GET / POST  | `/api/simtracer-stop`    | `GET  http://localhost:8777/trace-stop`      |
+
+## Service restart
+
+| Method | Path                   | Purpose                                                                 |
+|--------|------------------------|-------------------------------------------------------------------------|
+| POST   | `/api/restart-service` | Restart a backend systemd unit and poll until its TCP port is listening |
+
+Request body: `{"service": "<key>"}` where `<key>` is one of:
+
+| Key           | systemd unit           | Port |
+|---------------|------------------------|------|
+| `serialmodem` | `serialmodeminterface` | 8666 |
+| `qcsuper`     | `serialmodemtrace`     | 8888 |
+| `simtracer`   | `serialsimtrace`       | 8777 |
+
+Response includes `ok`, `restart_ok`, `restart_output`, `port_listening`, and
+`elapsed_s`. The webapp must be able to run `systemctl restart` (installed
+as root under systemd).
 
 ## Trace files
 
 | Method | Path                                          | Purpose                                                        |
 |--------|-----------------------------------------------|----------------------------------------------------------------|
-| GET    | `/api/trace-files`                            | List `*.pcap` and other files under `TRACE_DIRS`.              |
+| GET    | `/api/trace-files`                            | List regular files under `TRACE_DIRS`.                         |
 | GET    | `/api/trace-files/<source>/<filename>`        | Download one file. `source` is `simtracer` or `modemtracer`.   |
+| DELETE | `/api/trace-files/<source>/<filename>`        | Delete one file from disk (path validated like GET).           |
 
 `TRACE_DIRS` is hard-coded in `main.py`:
 
@@ -170,10 +198,23 @@ Each line of the response body is one JSON document:
 | `attempt`   | After every command execution (so retries each get an event).                         |
 | `error`     | Executor bailed out (`max steps` exceeded, `goto` target missing).                    |
 | `aborted`   | The user POSTed `/api/batch/abort` and the executor honoured it.                      |
+| `meta`      | Final line after all steps; includes `tsv_file` and `tsv_name` for the run log.       |
 
 Final attempts of a step (success, or last retry) additionally carry
 `success`, `action`, `sleep_seconds`, `next_index`. The frontend uses the
 presence of `action` to mark the step's last row.
+
+### Batch TSV log
+
+Every `/api/batch/run` writes a UTF-8 TSV alongside modem trace files:
+
+```
+/opt/serial-modemtracing/traces/<TZ>-<YYYYMMDD>-<HHMMSS>-atserial.tsv
+```
+
+Columns: `Step`, `Line`, `Timestamp`, `Type`, `Command`, `Attempt`, `Result`,
+`Action`, `ms`, `Output`. The file appears in the **Log Files** tab under
+source `modemtracer` and can be downloaded or deleted like any other trace file.
 
 ### Examples
 
@@ -193,6 +234,19 @@ curl -N -s -X POST http://localhost:9000/api/batch/run \
 
 # from another shell, stop a running batch
 curl -s -X POST http://localhost:9000/api/batch/abort | jq
+
+# restart a backend service from the banner buttons
+curl -s -X POST http://localhost:9000/api/restart-service \
+  -H 'Content-Type: application/json' \
+  -d '{"service":"serialmodem"}' | jq
+
+# QLog (proxied to serial-modemtracing)
+curl -s http://localhost:9000/api/qlog-active | jq
+curl -s -X POST http://localhost:9000/api/qlog-start | jq
+
+# list / delete trace files
+curl -s http://localhost:9000/api/trace-files | jq
+curl -s -X DELETE http://localhost:9000/api/trace-files/modemtracer/old.pcap | jq
 ```
 
 `-N` (`--no-buffer`) is important - without it `curl` will buffer the
@@ -202,9 +256,9 @@ NDJSON stream and you won't see live progress.
 
 ```
 # 1. ensure all three backend APIs are up
-sudo systemctl status serialatinterface
 sudo systemctl status serialmodeminterface
-sudo systemctl status simtraceinterface
+sudo systemctl status serialmodemtrace
+sudo systemctl status serialsimtrace
 
 # 2. start (or restart) the webapp
 sudo systemctl restart webinterface
@@ -213,17 +267,20 @@ sudo systemctl restart webinterface
 xdg-open http://localhost:9000     # or: http://<rpi>:9000 from your laptop
 
 # 4. drive the modem from the page:
-#    - read modem info
+#    - read modem info; use Restart Service if interfaces go stale
 #    - send AT commands one by one, or paste a script and click Run
-#    - start QCSuper / SIMtracer2 traces, exercise, stop
-#    - download the resulting pcaps from the "Log Files" tab
+#    - start QCSuper / QLog / SIMtracer2 traces, exercise, stop
+#    - download or delete files from the "Log Files" tab
 ```
 
 # Troubleshooting
 
 - **All status dots stay gray** - one or more backend APIs are not running.
-  Check `systemctl status serialatinterface serialmodeminterface
-  simtraceinterface` and `journalctl -u <service> -f`.
+  Check `systemctl status serialmodeminterface serialmodemtrace
+  serialsimtrace webinterface` and `journalctl -u <service> -f`.
+- **Restart Service fails** - the webapp could not run `systemctl restart`
+  or the port did not come back within ~15s. Read `#restart-status` in the UI
+  or inspect the JSON from `/api/restart-service`.
 - **Modem Info shows red rows** - `serial-at-api` could not detect the
   expected interfaces (modem unplugged, missing `modem.json` mapping, or
   `udev` rule not yet applied).

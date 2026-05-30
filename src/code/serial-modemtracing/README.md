@@ -18,6 +18,9 @@ so that service must be reachable before this one starts.
 Application is running API on `http://localhost:8888`. The idea is not to
 expose this to the world, as RasPi should run locally.
 
+The web UI proxies these endpoints as `/api/qcsuper-*` and `/api/qlog-*` on
+port 9000.
+
 # Application Setup
 
 ## System dependencies
@@ -26,6 +29,8 @@ Installed and configured via the `../../../install.sh` script. In short:
 
 - QCSuper is cloned to `/opt/qcsuper/` and its venv contains `pyserial`,
   `pyusb`, `crcmod`, `pycrate`.
+- **QLog** binary at `/opt/QLog` (installed from `bin/aarch64/QLog` by
+  `install.sh`; see `bin/aarch64/qlog_compile.md` for build notes).
 - `serial-at-api` must be installed and running on port `8666`.
 
 ## Python environment
@@ -108,6 +113,9 @@ curl -s http://localhost:8888/qlog-stop | jq
 
 Service log: `/var/log/qlog-api.log`.
 
+Captured files land in `/opt/serial-modemtracing/traces/` (QCSuper `*.pcap`,
+QLog output, and batch-run `*-atserial.tsv` files written by the webapp).
+
 ```
 # is a qcsuper trace active?
 # -> { "running": true, "pids": [9421],
@@ -160,7 +168,8 @@ A bash smoke test that exercises every endpoint in order is provided at
 ```
 ./tests/curl-smoke.sh             # full lifecycle (default)
 ./tests/curl-smoke.sh discovery   # only / and /modem-info
-./tests/curl-smoke.sh trace       # only the trace section
+./tests/curl-smoke.sh trace       # only the QCSuper trace section
+./tests/curl-smoke.sh qlog        # only the QLog section
 ./tests/curl-smoke.sh cleanup     # stop any running trace
 
 # capture for 30s instead of the default 10s
@@ -183,3 +192,8 @@ BASE=http://10.0.0.5:8888 ./tests/curl-smoke.sh
   produced a pcap. Look in `/var/log/qcsuper-api.log` if it didn't.
 - **API exits with code `1` on startup** - either QCSuper is not installed
   at `/opt/qcsuper/` or `serial-at-api` isn't reachable on `:8666`.
+- **`/qlog-start` fails or QLog exits immediately** - check
+  `/var/log/qlog-api.log`. Ensure `/opt/QLog` exists (aarch64 binary from
+  `install.sh`). A running QCSuper trace holds the Diag port — run
+  `/trace-stop` first (the API also stops QCSuper automatically when starting
+  QLog).

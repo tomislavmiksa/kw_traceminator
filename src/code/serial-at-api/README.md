@@ -1,28 +1,35 @@
 # Introduction
 
-This module is created in order to communicate with the modem serial interface.
-At the moment only Quectel EC25 is supported, plan to add BG96 in a very near future.
+This module communicates with the modem over its AT serial interface. It
+detects Quectel modems by USB ID and maps kernel interface indices (`if00`,
+`if01`, …) to logical roles (`AT`, `Diag`, `NMEA`, …) using
+`modules/data/modem.json`.
 
-Application is running API on the `http://localhost/8666` and the most common calls are
+Supported modem profiles today:
 
-```
-# get the basic application information
-curl http://localhost:8666/
+| Model | Notes                                      |
+|-------|--------------------------------------------|
+| EC25  | Full interface map including NDIS          |
+| BG96  | AT, Diag, NMEA, Modem (no NDIS in mapping) |
 
-# execute the AT command and get the output result
-# - with the command bellow you are getting back the output of the ATI Command
-curl --request POST --header  "Content-Type: application/json" --data '{"cmd": "ATI"}' http://localhost:8666/at
+Other modules depend on this service — especially `serial-modemtracing`, which
+reads the Diag port from `GET /modem` at startup.
 
-# get the modem ports mapping information
-curl http://localhost:8666/modem
-```
+Application runs on `http://localhost:8666`. Bind is loopback-only (`127.0.0.1`);
+the web UI reaches it via the `webapp-flask` proxy at `/api/modem` and
+`/api/at`.
 
 # Application Setup
 
-## Set Python
+## System dependencies
 
-- as to access serial port requires the root permissions, all CMD bellow should be executed as root
-- API should be ran by  root user
+Installed and configured via the `../../../install.sh` script. The process
+exits on startup if no modem with a valid `AT` port is detected.
+
+## Python environment
+
+- serial port access requires root, so the API service runs as root
+- all commands below should be executed as root
 
 ```
 python3 -m venv .venv
@@ -31,16 +38,91 @@ source .venv/bin/activate
 pip3 install -r ./requirements.txt
 ```
 
-## User must have permissiong for serial
+## Run
 
 ```
-sudo usermod -a -G dialout $USER
+python3 main.py
 ```
 
-## Recommandation
+The API binds `127.0.0.1:8666`.
 
-- helps with testing the API and access to it
+## Run as a systemd service
+
+`service/serialmodeminterface.service` is installed by `install.sh` to
+`/etc/systemd/system/serialmodeminterface.service`:
 
 ```
-sudo apt install jq
+sudo systemctl enable --now serialmodeminterface
+sudo systemctl status serialmodeminterface
+sudo journalctl -u serialmodeminterface -f
 ```
+
+# API endpoints
+
+| Method | Path    | Purpose                                                       |
+|--------|---------|---------------------------------------------------------------|
+| GET    | `/`     | API metadata (`Version`, detected `Modem` port map)           |
+| GET    | `/modem`| JSON map of logical roles → `/dev/serial/by-id/...` paths     |
+| POST   | `/at`   | Send one AT command; returns normalized single-line response  |
+
+## Discovery
+
+```
+curl -s http://localhost:8666/ | jq
+curl -s http://localhost:8666/modem | jq
+```
+
+## Send AT command
+
+Request body: `{"cmd": "ATI"}` (must match `^[aA][tT].*`).
+
+Optional: `"timeout": <seconds>` (default `2`) — sleep before reading the
+serial buffer.
+
+```
+curl -s -X POST http://localhost:8666/at \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd": "ATI"}' | jq
+```
+
+Response shape:
+
+```json
+{ "Response": "200", "cmd": "ATI", "response": "Quectel;EC25;..." }
+```
+
+Newlines in the modem reply are collapsed to `;` for easier JSON handling.
+
+# Typical workflow
+
+```
+# 1. confirm the modem is mapped
+curl -sf http://localhost:8666/modem | jq
+
+# 2. sanity-check AT
+curl -s -X POST http://localhost:8666/at \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd": "AT"}' | jq
+
+# 3. other services (modemtracing, webapp) consume /modem automatically
+```
+
+# Smoke test
+
+```
+./tests/curl-smoke.sh
+BASE=http://127.0.0.1:8666 ./tests/curl-smoke.sh
+```
+
+# Troubleshooting
+
+- **Process exits immediately with "no valid modem detected"** — modem
+  unplugged, wrong USB IDs, or interface indices changed. Re-plug and check
+  `modules/data/modem.json`.
+- **`/at` returns 400** — body missing, or `cmd` does not start with `AT`.
+- **Empty `/at` response** — increase `"timeout"` in the JSON body; the modem
+  may still be booting after `AT+CFUN=1,1`.
+- **Red rows in the TRACEMINATOR UI** — one or more expected interfaces from
+  `modem.json` were not found under `/dev/serial/by-id/`. Use the **Restart
+  Serial Modem** button or `systemctl restart serialmodeminterface` after a
+  modem reset.

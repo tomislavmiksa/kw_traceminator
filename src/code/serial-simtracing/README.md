@@ -8,9 +8,16 @@ The API wraps three external tools:
 
 - `simtrace2-list`  - enumerate the SIMtrace2 USB interfaces present on the host.
 - `simtrace2-sniff` - long-running daemon that forwards SIM APDUs as GSMTAP datagrams over UDP/4729 on `lo`.
-- `tcpdump`         - listens on `lo`, filters `udp port 4729`, and writes a `pcap` to `./traces/`.
+- `tcpdump`         - listens on `lo`, filters `udp port 4729`, and writes a `pcap` to the trace directory.
 
-Application is running API on `http://localhost:8777`. The idea is not to expose this to the world, as RasPi shopuld run locally.
+Application is running API on `http://localhost:8777`. The idea is not to expose
+this to the world, as RasPi should run locally.
+
+When installed via `install.sh`, trace files are written to
+`/opt/serial-simtracing/traces/` (systemd unit `serialsimtrace`). In a dev
+checkout, `./traces/` next to `main.py` is used instead.
+
+The web UI proxies trace control as `/api/simtracer-*` on port 9000.
 
 # Application Setup
 
@@ -38,6 +45,17 @@ python3 main.py
 
 The API binds `0.0.0.0:8777`. On startup it runs `simtrace2-list`; if no
 SIMtrace2 device is detected, the process exits with code `1`.
+
+## Run as a systemd service
+
+`service/serialsimtrace.service` is installed by `install.sh` to
+`/etc/systemd/system/serialsimtrace.service`:
+
+```
+sudo systemctl enable --now serialsimtrace
+sudo systemctl status serialsimtrace
+sudo journalctl -u serialsimtrace -f
+```
 
 # API endpoints
 
@@ -86,7 +104,8 @@ curl -s http://localhost:8777/sniff-stop | jq
 ## Trace lifecycle
 
 `tcpdump` listens on `lo`, filters `udp port 4729`, and writes a pcap into
-`./traces/<TZ>-<YYYYMMDD>-<HHMMSS>-simtrace.pcap`.
+`<trace-dir>/<TZ>-<YYYYMMDD>-<HHMMSS>-simtrace.pcap` (see trace directory
+above).
 
 ```
 # is a simtrace tcpdump active?
@@ -120,7 +139,7 @@ curl -s http://localhost:8777/trace-stop | jq
 
 # 5. find the resulting pcap
 curl -s http://localhost:8777/trace-list | jq
-ls -lh ./traces/
+ls -lh /opt/serial-simtracing/traces/    # when installed via install.sh
 ```
 
 The pcap can be opened directly with Wireshark - GSMTAP packets are decoded

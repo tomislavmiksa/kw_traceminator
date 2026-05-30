@@ -17,12 +17,15 @@ you:
   criteria and `goto`/`sleep` flow control,
 - capture **modem-side** packet traces via `qcsuper.py` (GSM/UMTS/LTE/NR
   L2/L3, NAS, reassembled SIBs, IP traffic) into `pcap`,
+- capture **modem-side** diagnostic logs via **QLog** (Quectel QXDM-style
+  capture on the Diag port) into `/opt/serial-modemtracing/traces`,
 - capture **SIM-side** APDU traces via `simtrace2-sniff` + `tcpdump`
   (GSMTAP on `udp/4729`) into `pcap`,
-- browse and download the resulting trace files from the same web UI.
+- browse, download, and delete trace files from the same web UI,
+- restart backend services from the UI when serial interfaces get out of sync.
 
-Everything runs locally on the Pi, behind one orange-themed page at
-`http://<pi>:9000`.
+Everything runs locally on the Pi, behind one orange-themed page titled
+**TRACEMINATOR** at `http://<pi>:9000`.
 
 As all the tools and publically available under the Opensource license, this product just assembles them and provides and User Interface for easier management and log collection. It is licensed under MIT license, therefore feel free to use it as you wish. 
 
@@ -39,27 +42,31 @@ After logged in, the WebApp shall present a simple WebGUI with:
 	- **Control**
 	          ![](attachments/Pasted%20image%2020260504100007.png)
 		- is an interface to control the Tracing and Log collection tools
-		- at the moment QCSuper and Simtrase via Sysmocom Simtrace2 supported
-		- by clicking Start and Stop button you start or terminate the traces collection
+		- **QCSuper**, **QLog**, and **SIMtrace2** (via Osmocom Simtrace2) are supported
+		- QCSuper and QLog share the modem Diag port — only one can run at a time
+		- by clicking Start and Stop you start or terminate trace collection
 	- **Logs**
 	          ![](attachments/Pasted%20image%2020260504100031.png)
 		- contains the information about all logging attempts
 	- **Log Files**
 	          ![](attachments/Pasted%20image%2020260504100107.png)
-		- is an interface to download the collected logs and traces locally
-- Modem Commands
-	- the GUI interface executing interactions with the mocem via serial AT
+		- lists files under `/opt/serial-modemtracing/traces` and
+		  `/opt/serial-simtracing/traces` (`pcap`, batch-result `*.tsv`, QLog output, …)
+		- download or delete individual files from the browser
+- **Modem Commands**
+	- the GUI interface for executing interactions with the modem via serial AT
 	- **Single AT**
 	          ![](attachments/Pasted%20image%2020260504100416.png)
 		- interface to run a single AT command on the modem
 	- **Modem Batch Instructions**
 	          ![](attachments/Pasted%20image%2020260504101139.png)
-		- interface to run a script, combination of the AT commands (on the modem) as well as shell commands (on the RasPi)
-		- read separate section about the implemented syntax
-		- useful for running measurements over long period of time as supports looping and conditional statements
-	- **AT Logs**
-	         ![](attachments/Pasted%20image%2020260504101205.png)
-		- log table of all commands execued with modem and RasPi
+		- interface to run a script — a combination of AT commands (on the modem)
+		  and shell commands (on the RasPi)
+		- read the separate section about the implemented syntax
+		- useful for running measurements over long periods; supports looping,
+		  retries, regex matching, and conditional `goto` / `sleep` flow control
+		- live results stream into the page; each run also writes a TSV log file
+		  (`<TZ>-<YYYYMMDD>-<HHMMSS>-atserial.tsv`) alongside modem traces
 
 ## Modem Batch Syntax
 
@@ -72,6 +79,11 @@ After logged in, the WebApp shall present a simple WebGUI with:
 | `reattempts`     | no        | Extra retries on failure (default 0). Total tries = `1 + reattempts`.                  |
 | `if_success`     | no        | Flow action on success. `""`/`next` (default), `goto N`, `sleep N`, `stop`.            |
 | `if_failed`      | no        | Same vocabulary as `if_success`; runs when all retries are exhausted without matching. |
+
+Each batch run streams live NDJSON to the browser and writes a TSV log to
+`/opt/serial-modemtracing/traces/<TZ>-<YYYYMMDD>-<HHMMSS>-atserial.tsv`
+(columns: Step, Line, Timestamp, Type, Command, Attempt, Result, Action, ms,
+Output). Use **Abort** or `POST /api/batch/abort` to stop a long-running script.
 
 ### Example 1: SIM available?
 
@@ -130,11 +142,11 @@ After logged in, the WebApp shall present a simple WebGUI with:
 ┌────────────────────┐            ┌──────────────────────────┐            ┌───────────────────────────┐
 │ serial-at-api 8666 │            │ serial-modemtracing 8888 │            │ serial-simtracing  8777   │
 │ /modem  /at        │            │ /modem-info /trace-*     │            │ /list /sniff-* /trace-*   │
-└──────────┬─────────┘            └──────────┬───────────────┘            └──────────────┬────────────┘
-           │ pyserial                        │ qcsuper.py                                │ simtrace2-sniff
-           ▼                                 ▼                                           │ + tcpdump (udp/4729)
+└──────────┬─────────┘            │ /qlog-*                  │            └──────────────┬────────────┘
+           │ pyserial              └──────────┬───────────────┘                       │ simtrace2-sniff
+           ▼                                 ▼ qcsuper.py + QLog                      │ + tcpdump (udp/4729)
    /dev/serial/by-id/...              /dev/serial/by-id/...                              ▼
-   (Quectel EC25 AT port)             (Quectel EC25 Diag port)                  /dev/bus/usb/... (SIMtrace2)
+   (Quectel AT port)                   (Quectel Diag port)                       /dev/bus/usb/... (SIMtrace2)
 ```
 
 The browser only ever talks to `webapp-flask`; CORS and split origins
@@ -148,8 +160,8 @@ tests, and troubleshooting notes:
 
 | Component             | Port  | Path                              | Role                                                         |
 |-----------------------|-------|-----------------------------------|--------------------------------------------------------------|
-| `serial-at-api`       | 8666  | [src/code/serial-at-api/](src/code/serial-at-api)              | Detect modem & expose `/modem` + `/at` (raw AT)              |
-| `serial-modemtracing` | 8888  | [src/code/serial-modemtracing/](src/code/serial-modemtracing/README.md)  | Wrap `qcsuper.py` for modem `pcap` capture                   |
+| `serial-at-api`       | 8666  | [src/code/serial-at-api/](src/code/serial-at-api/README.md)              | Detect modem & expose `/modem` + `/at` (raw AT)              |
+| `serial-modemtracing` | 8888  | [src/code/serial-modemtracing/](src/code/serial-modemtracing/README.md)  | Wrap `qcsuper.py` + QLog for modem capture                  |
 | `serial-simtracing`   | 8777  | [src/code/serial-simtracing/](src/code/serial-simtracing/README.md)      | Wrap `simtrace2-sniff` + `tcpdump` for SIM `pcap` capture    |
 | `webapp-flask`        | 9000  | [src/gui/webapp-flask/](src/gui/webapp-flask/README.md)                  | Single-page UI + same-origin JSON proxy + script runner      |
 
@@ -157,6 +169,9 @@ External binaries pulled in by the installer:
 
 - **QCSuper** - cloned from `https://github.com/P1sec/QCSuper` into `/opt/qcsuper`,
   with its own venv (`pyserial`, `pyusb`, `crcmod`, `pycrate`).
+- **QLog** - pre-built binary copied to `/opt/QLog` (aarch64; see
+  `bin/aarch64/qlog_compile.md` for build notes). Used for Quectel QXDM-style
+  Diag capture when QCSuper is not the right tool.
 - **simtrace2-utils**, **libosmocore**, **tcpdump** - via the Osmocom
   Debian repo (`https://downloads.osmocom.org/packages/osmocom:/latest/...`).
 
@@ -164,10 +179,11 @@ External binaries pulled in by the installer:
 
 Tested on a **Raspberry Pi 5 with 8GB or RAM running Debian 13 (Bookworm/Trixie)** with:
 
-- **[Quectel EC25](https://www.quectel.com/product/lte-ec25-mini-pcie-series/)** modem (any `EC25-*` variant). The AT and Diag
+- **[Quectel EC25](https://www.quectel.com/product/lte-ec25-mini-pcie-series/)** or
+  **[Quectel BG96](https://www.quectel.com/product/lte-bg96/)** modem. The AT and Diag
   serial nodes are mapped via `udev`-stable paths (see
   `src/code/serial-at-api/modules/data/modem.json` for the interface
-  index → role mapping). 
+  index → role mapping).
 - The modem was connected to RasPi via the **[LTE Hat from Sixfab](https://sixfab.com/product/raspberry-pi-base-hat-3g-4g-lte-minipcie-cards/?srsltid=AfmBOopjMbo1sII3IzJqDuX9xgrr7PmO8YUcu7Z7fgfbVAe8KM7sxNPp)**
 - **[Osmocom SIMtrace2](https://osmocom.org/projects/simtrace2/wiki)** USB device for SIM-side capture (optional;
   modem-only setups can ignore the simtracing service).
@@ -223,13 +239,14 @@ Bus 003 Device 014: ID 2c7c:0296 Quectel Wireless Solutions Co., Ltd. BG96 CAT-M
 The UI surfaces:
 
 1. **Modem Information** - which interfaces were detected (red rows on
-   missing interfaces).
-2. **Trace and Logs Management** - QCSuper / SIMtracer2 status dots,
-   Start/Stop buttons, an event log, and a "Log Files" tab to download
-   captured `pcap`s.
-3. **Modem Commands** - single AT command sender, a 250-line script
-   runner ("Modem Batch Instructions") with live streamed results, and
-   the cumulative AT command log (every attempt, AT and `sh` both).
+   missing interfaces). Banner buttons restart individual backend services
+   when serial ports get out of sync after a modem reboot.
+2. **Trace and Logs Management** - QCSuper / QLog / SIMtracer2 status dots,
+   Start/Stop buttons, an event log, and a **Log Files** tab to download or
+   delete captured files (`pcap`, batch TSV, QLog output, …).
+3. **Modem Commands** - single AT command sender and a 250-line script
+   runner (**Modem Batch Instructions**) with live streamed results and
+   per-run TSV export.
 
 # Managing the services
 
@@ -290,7 +307,7 @@ sudo ./install.sh -d
 This stops + disables the four units, removes their `.service` files
 from `/etc/systemd/system/`, and deletes `/opt/serial-at-api`,
 `/opt/serial-modemtracing`, `/opt/serial-simtracing`,
-`/opt/webapp-flask`, and `/opt/qcsuper`. Captured `pcap`s under
+`/opt/webapp-flask`, `/opt/qcsuper`, and `/opt/QLog`. Captured files under
 `/opt/serial-*/traces/` are removed with their parent directories - back
 them up first if you need them.
 
@@ -310,6 +327,9 @@ left in place; remove them manually if no longer needed.
 - **`/api/batch/run` returns HTTP 409** - another batch is already
   running on the webapp. POST `/api/batch/abort` (the **Abort** button
   does this) and retry.
+- **QCSuper and QLog both show green** - they share the Diag port; the API
+  stops one before starting the other. If a dot stays gray, check
+  `journalctl -u serialmodemtrace -f` and `/var/log/qlog-api.log`.
 - **Live batch updates show all-at-once instead of streaming** - some
   reverse proxy is buffering. The endpoint sets `X-Accel-Buffering: no`;
   if you've put nginx in front, also set `proxy_buffering off`.
@@ -322,7 +342,7 @@ left in place; remove them manually if no longer needed.
 
 For component-specific failures, see each component's own README:
 
-- [serial-at-api](src/code/serial-at-api/)
+- [serial-at-api](src/code/serial-at-api/README.md)
 - [serial-modemtracing](src/code/serial-modemtracing/README.md)
 - [serial-simtracing](src/code/serial-simtracing/README.md)
 - [webapp-flask](src/gui/webapp-flask/README.md)
@@ -330,9 +350,10 @@ For component-specific failures, see each component's own README:
 # Changelog
 
 
-| Date       | Version | Author                            | Description     |
-| ---------- | ------- | --------------------------------- | --------------- |
-| 2026-05-04 | 1.0.0   | Tomislav Miksa <tmiksa@zgmc.info> | Initial Version |
+| Date       | Version | Author                            | Description                                                                 |
+| ---------- | ------- | --------------------------------- | --------------------------------------------------------------------------- |
+| 2026-05-30 | 1.1.0   | Tomislav Miksa <tmiksa@zgmc.info> | QLog capture, batch TSV logs, trace delete, service restart, UI polish      |
+| 2026-05-04 | 1.0.0   | Tomislav Miksa <tmiksa@zgmc.info> | Initial Version                                                             |
 
 
 # License
