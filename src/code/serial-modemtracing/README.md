@@ -15,6 +15,12 @@ The Diag port mapping is **not** discovered locally - it is fetched from
 the `serial-at-api` service on `http://localhost:8666/modem` at startup,
 so that service must be reachable before this one starts.
 
+**Modem compatibility:** EC25, EG25G, and BG96 are used routinely for
+QCSuper and QLog captures. **RG255C-GL** support is still **under testing**;
+5G **RedCap** trace decode and attach behaviour are **under evaluation**
+(QCSuper has partial NR support; Quectel QLog is often the practical path on
+newer Quectel 5G modules).
+
 Application is running API on `http://localhost:8888`. The idea is not to
 expose this to the world, as RasPi should run locally.
 

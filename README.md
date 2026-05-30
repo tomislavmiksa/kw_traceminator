@@ -1,9 +1,13 @@
 # kw_traceminator
 
 A self-contained modem diagnostic and trace-capture toolchain for a
-Raspberry Pi connected to a 
-- **Quectel EC25** modem 
-- **Quectel BG96** modem
+Raspberry Pi connected to a Quectel modem, for example:
+
+- **Quectel EC25** (LTE)
+- **Quectel EG25G** (LTE)
+- **Quectel BG96** (Cat-M1 / NB-IoT)
+- **Quectel RG255C-GL** (5G RedCap — still under testing; see [Hardware](#hardware))
+
 and (optionally) an **Osmocom SIMtrace2** USB device.
 
 The measurement system finally looks like
@@ -179,18 +183,24 @@ External binaries pulled in by the installer:
 
 Tested on a **Raspberry Pi 5 with 8GB or RAM running Debian 13 (Bookworm/Trixie)** with:
 
-- **[Quectel EC25](https://www.quectel.com/product/lte-ec25-mini-pcie-series/)** or
-  **[Quectel BG96](https://www.quectel.com/product/lte-bg96/)** modem. The AT and Diag
-  serial nodes are mapped via `udev`-stable paths (see
-  `src/code/serial-at-api/modules/data/modem.json` for the interface
-  index → role mapping).
+| Modem | Status | Notes |
+|-------|--------|-------|
+| [Quectel EC25](https://www.quectel.com/product/lte-ec25-mini-pcie-series/) | Supported | LTE; full interface map including NDIS |
+| [Quectel EG25G](https://www.quectel.com/product/lte-eg25-g/) | Supported | LTE; same USB interface layout as EC25 (detected via `EG25` profile in `modem.json`) |
+| [Quectel BG96](https://www.quectel.com/product/lte-bg96/) | Supported | Cat-M1 / NB-IoT |
+| [Quectel RG255C-GL](https://www.quectel.com/product/5g-rg255c-series/) | **Under testing** | 5G module (Qualcomm SDX35). AT/Diag mapping is in `modem.json`, but end-to-end validation is ongoing. **5G RedCap** attach and trace behaviour (QCSuper, QLog) is **under evaluation** — expect gaps compared with mature LTE modules. |
+
+The AT and Diag serial nodes are mapped via `udev`-stable paths (see
+`src/code/serial-at-api/modules/data/modem.json` for the interface
+index → role mapping per model).
+
 - The modem was connected to RasPi via the **[LTE Hat from Sixfab](https://sixfab.com/product/raspberry-pi-base-hat-3g-4g-lte-minipcie-cards/?srsltid=AfmBOopjMbo1sII3IzJqDuX9xgrr7PmO8YUcu7Z7fgfbVAe8KM7sxNPp)**
 - **[Osmocom SIMtrace2](https://osmocom.org/projects/simtrace2/wiki)** USB device for SIM-side capture (optional;
   modem-only setups can ignore the simtracing service).
 
-Other Qualcomm-based USB modems should work for the QCSuper part as long
-as they expose a Diag interface; the AT endpoint mapping is currently
-EC25-specific.
+Other Qualcomm-based USB modems may work for QCSuper/QLog as long as they
+expose a Diag interface, but only the models listed above have explicit
+`modem.json` mappings for automatic port detection.
 
 # Repository layout
 
@@ -221,7 +231,7 @@ creates a venv, installs the unit file, and starts the service.
 git clone <this-repo>.git kw_traceminator
 cd kw_traceminator
 
-# 2. plug in the EC25 modem (and optionally the SIMtrace2)
+# 2. plug in the modem (and optionally the SIMtrace2)
 
 # 3. install everything (services, QCSuper, simtrace2-utils, webapp)
 sudo ./install.sh -i
@@ -321,8 +331,8 @@ left in place; remove them manually if no longer needed.
   running. `systemctl status serialmodeminterface serialmodemtrace
   serialsimtrace webinterface`.
 - **Modem Information shows red rows** - `serial-at-api` could not detect
-  the expected EC25 interfaces. Re-plug the modem; if the kernel labels
-  changed, check the mapping in
+  the expected interfaces for your modem model. Re-plug the modem; if the
+  kernel labels changed, check the mapping in
   `src/code/serial-at-api/modules/data/modem.json`.
 - **`/api/batch/run` returns HTTP 409** - another batch is already
   running on the webapp. POST `/api/batch/abort` (the **Abort** button
@@ -352,7 +362,7 @@ For component-specific failures, see each component's own README:
 
 | Date       | Version | Author                            | Description                                                                 |
 | ---------- | ------- | --------------------------------- | --------------------------------------------------------------------------- |
-| 2026-05-30 | 1.1.0   | Tomislav Miksa <tmiksa@zgmc.info> | QLog capture, batch TSV logs, trace delete, service restart, UI polish      |
+| 2026-05-30 | 1.1.0   | Tomislav Miksa <tmiksa@zgmc.info> | QLog, batch TSV, trace delete, service restart; EG25G + RG255C-GL modem profiles |
 | 2026-05-04 | 1.0.0   | Tomislav Miksa <tmiksa@zgmc.info> | Initial Version                                                             |
 
 

@@ -7,10 +7,15 @@ detects Quectel modems by USB ID and maps kernel interface indices (`if00`,
 
 Supported modem profiles today:
 
-| Model | Notes                                      |
-|-------|--------------------------------------------|
-| EC25  | Full interface map including NDIS          |
-| BG96  | AT, Diag, NMEA, Modem (no NDIS in mapping) |
+| Model       | `modem.json` key | Notes |
+|-------------|------------------|-------|
+| EC25        | `EC25`           | Full interface map including NDIS |
+| EG25G       | `EG25`           | Same USB interface layout as EC25; detected when `lsusb` product string contains `EG25` |
+| BG96        | `BG96`           | AT, Diag, NMEA, Modem (no NDIS in mapping) |
+| RG255C-GL   | `RG255C-GL`      | **Under testing.** 5G RedCap (SDX35). Mapping is present; **RedCap functionality is under evaluation** — report issues if attach or tracing behaves unexpectedly. |
+
+Detection walks `modem.json` in order and picks the first entry whose key
+matches a substring in `lsusb` output.
 
 Other modules depend on this service — especially `serial-modemtracing`, which
 reads the Diag port from `GET /modem` at startup.
