@@ -1,9 +1,11 @@
+import csv
 import json
 import re
 import socket
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -303,6 +305,16 @@ MAX_SH_TIMEOUT       = 60      # one shell command
 MAX_SCRIPT_STEPS     = 500     # total executed steps (defends against goto loops)
 INTER_ATTEMPT_DELAY  = 0.2     # seconds between retries on the same line
 
+# Batch-run TSV logs land alongside modem trace files so they show up in the
+# Log Files tab (modemtracer source). Filename pattern:
+#   CEST-20260503-155457-atserial.tsv
+BATCH_TSV_DIR    = TRACE_DIRS["modemtracer"]
+BATCH_TSV_SUFFIX = "atserial"
+BATCH_TSV_COLUMNS = (
+    "Step", "Line", "Timestamp", "Type", "Command",
+    "Attempt", "Result", "Action", "ms", "Output",
+)
+
 # Sentinel used to escape literal ":" inside fields (\: in source). We turn
 # every \: into this sentinel before splitting on ":", then turn each piece
 # back. Picked a NUL-padded run so it cannot collide with anything user-typed.
@@ -490,6 +502,80 @@ def parse_script(text):
             raise ScriptParseError(f"duplicate index {ln['index']}")
         seen.add(ln["index"])
     return out
+
+
+def make_batch_tsv_path() -> Path:
+    """Return a new batch-results TSV path under BATCH_TSV_DIR."""
+    name = f"{time.strftime('%Z-%Y%m%d-%H%M%S')}-{BATCH_TSV_SUFFIX}.tsv"
+    return BATCH_TSV_DIR / name
+
+
+def _format_epoch_ms(ms) -> str:
+    """Format server epoch-ms timestamps like the UI (UTC, ms precision)."""
+    if ms is None:
+        return ""
+    sec, ms_part = divmod(int(ms), 1000)
+    base = datetime.fromtimestamp(sec, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return f"{base}.{ms_part:03d}"
+
+
+def _batch_action_label(ev: dict) -> str:
+    """Mirror the Action column logic from templates/index.html."""
+    if "action" not in ev:
+        return ""
+    action = ev.get("action") or "next"
+    next_idx = ev.get("next_index")
+    if next_idx is not None and (action == "next" or action.startswith("sleep")):
+        return f"{action} -> {next_idx}"
+    return action
+
+
+def batch_event_to_tsv_row(ev: dict) -> list[str] | None:
+    """Map one streamed batch event to a #batch-results table row (TSV)."""
+    kind = ev.get("kind")
+    if kind in ("error", "aborted") or ev.get("error"):
+        return [
+            str(ev.get("step", "")),
+            "", "", "", "", "", "", "", "",
+            f"ERROR: {ev.get('error', 'unknown')}",
+        ]
+    if kind != "attempt":
+        return None
+    verdict = "\u2713" if ev.get("matched") else "\u2717"
+    return [
+        str(ev.get("step", "")),
+        str(ev.get("index", "")),
+        _format_epoch_ms(ev.get("started_at")),
+        str(ev.get("type", "")),
+        str(ev.get("cmd", "")),
+        f"{ev.get('attempt', '')} / {ev.get('max_attempts', '')}",
+        verdict,
+        _batch_action_label(ev),
+        str(ev.get("duration_ms", "")),
+        str(ev.get("output", "")),
+    ]
+
+
+class BatchTsvWriter:
+    """Append batch-results rows to a UTF-8 TSV file, flushed after each row."""
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self._fh = path.open("w", encoding="utf-8", newline="")
+        self._writer = csv.writer(self._fh, delimiter="\t", lineterminator="\n")
+        self._writer.writerow(BATCH_TSV_COLUMNS)
+        self._fh.flush()
+
+    def write_event(self, ev: dict) -> None:
+        row = batch_event_to_tsv_row(ev)
+        if row is None:
+            return
+        self._writer.writerow(row)
+        self._fh.flush()
+
+    def close(self) -> None:
+        self._fh.close()
 
 
 def execute_at(cmd):
@@ -693,12 +779,21 @@ def batch_run():
         # The try/finally guarantees we release the singleton on success,
         # on user-requested abort, AND on client disconnect (Werkzeug
         # closes the generator -> GeneratorExit -> finally fires).
+        tsv_path = make_batch_tsv_path()
+        tsv = BatchTsvWriter(tsv_path)
         try:
             for step in run_script(lines):
+                tsv.write_event(step)
                 # Trailing newline turns this into NDJSON: each line is
                 # one complete JSON document, newline-delimited.
                 yield json.dumps(step) + "\n"
+            yield json.dumps({
+                "kind":     "meta",
+                "tsv_file": str(tsv_path),
+                "tsv_name": tsv_path.name,
+            }) + "\n"
         finally:
+            tsv.close()
             _end_batch()
 
     headers = {

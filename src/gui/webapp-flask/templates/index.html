@@ -56,10 +56,7 @@
        the <thead> row's index doesn't shift the parity of body rows. */
     tbody tr:nth-child(even) { background: #f0f0f0; }
 
-    /* Both log tables get a single outer 1px border but no internal cell
-       borders -- log content is multi-line <pre> JSON, so cell borders
-       would just clutter it. */
-    #at-log,
+    /* Log tables get a single outer 1px border but no internal cell borders. */
     #events-log,
     #batch-results { border: 1px solid #000; }
 
@@ -307,16 +304,13 @@
 
   <!-- ============================================================
        SECTION 3: Modem Commands
-       Three-tab UI: "Single AT" (live AT command input), "Script"
-       (placeholder for future script-runner), "Logs" (history of
-       AT commands sent + their responses).
+       Two-tab UI: "Single AT Instruction" and "Modem Batch Instructions".
        ============================================================ -->
   <h1>Modem Commands</h1>
   <div class="tab-group">
     <div class="tabs">
-      <button class="tab-button active" data-tab="single-at">Single AT</button>
+      <button class="tab-button active" data-tab="single-at">Single AT Instruction</button>
       <button class="tab-button"        data-tab="script">Modem Batch Instructions</button>
-      <button class="tab-button"        data-tab="logs">AT Logs</button>
     </div>
 
     <!-- SINGLE AT panel: text input + Send button. Pressing Enter in the
@@ -350,6 +344,7 @@
           <tr>
             <th>Step</th>
             <th>Line</th>
+            <th>Timestamp</th>
             <th>Type</th>
             <th>Command</th>
             <th>Attempt</th>
@@ -357,23 +352,6 @@
             <th>Action</th>
             <th>ms</th>
             <th>Output</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <!-- LOGS panel: history of every AT command sent from this page,
-         newest at top. Populated by appendAtRow() called from sendAt(). -->
-    <div class="tab-panel" data-tab-panel="logs">
-      <table id="at-log" cellpadding="4">
-        <thead>
-          <tr>
-            <th>Sending timestamp</th>
-            <th>Command Sent</th>
-            <th>Response timestamp</th>
-            <th>HTTP Status Code</th>
-            <th>Response data</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -432,8 +410,7 @@
       return new Date().toISOString().replace("T", " ").replace("Z", "");
     }
 
-    // Same format as ts(), but for a fixed Unix-epoch millisecond value
-    // (e.g. server-supplied started_at / ended_at on batch steps).
+    // Format server-supplied epoch ms (batch attempt started_at) like ts().
     function tsFromEpochMs(ms) {
       if (ms === null || ms === undefined) return "";
       return new Date(ms).toISOString().replace("T", " ").replace("Z", "");
@@ -471,37 +448,16 @@
       cell.append(pre);
     }
 
-    /* ---------- AT command log + send ---------- */
-
-    // Prepend one row to the AT command log. Last column (response data) goes
-    // through renderResponseCell for pretty-print. All other cells are plain
-    // text, including the status code column (so "200" and "—" both render as
-    // simple strings).
-    function appendAtRow(sentTs, cmd, recvTs, statusCode, response) {
-      const log = document.querySelector("#at-log tbody");
-      const tr = document.createElement("tr");
-      const values = [sentTs, cmd, recvTs, statusCode, response];
-      for (let i = 0; i < values.length; i++) {
-        const td = document.createElement("td");
-        if (i === values.length - 1) {
-          renderResponseCell(td, values[i]);
-        } else {
-          td.textContent = values[i];
-        }
-        tr.append(td);
-      }
-      log.prepend(tr);   // newest first
-   }
+    /* ---------- AT command send ---------- */
 
     // POST the contents of #at-cmd to the upstream serial-at-api via the
-    // /api/at proxy, log the round trip, and update #at-status.
+    // /api/at proxy and update #at-status.
     async function sendAt() {
       const cmd = document.getElementById("at-cmd").value.trim();
       const atStatus = document.getElementById("at-status");
       // Empty input -> guidance, no request fired.
       if (!cmd) { atStatus.textContent = "enter an AT command first"; return; }
 
-      const sentTs = ts();
       atStatus.textContent = "sending " + cmd + " ...";
       try {
         const r = await fetch("/api/at", {
@@ -518,13 +474,9 @@
         const respText = data.response !== undefined
             ? data.response
             : JSON.stringify(data);
-        appendAtRow(sentTs, cmd, recvTs, r.status, respText);
         atStatus.textContent = "HTTP " + r.status + " at " + recvTs + " - " + respText;
       } catch (err) {
         // Reached only on network error / DNS failure / unparseable body.
-        // No HTTP status, so log "—" (em-dash) in the code column.
-        const recvTs = ts();
-        appendAtRow(sentTs, cmd, recvTs, "—", "error: " + err.message);
         atStatus.textContent = "error: " + err.message;
       }
     }
@@ -877,6 +829,7 @@
       const cells = [
         ev.step,
         ev.index,
+        tsFromEpochMs(ev.started_at),
         ev.type,
         ev.cmd,
         attempt,
@@ -895,57 +848,27 @@
       tr.append(outTd);
 
       // Color the verdict cell green/red so the table scans easily.
-      tr.children[5].style.color = ev.matched ? "green" : "red";
-      tr.children[5].style.fontWeight = "bold";
+      tr.children[6].style.color = ev.matched ? "green" : "red";
+      tr.children[6].style.fontWeight = "bold";
 
       tbody.append(tr);
     }
 
-    // Render one streamed event into #batch-results and (for AT) #at-log.
-    // Synthetic error events -- emitted when the executor bails out
-    // (max-iterations, goto target missing) -- collapse into a single
-    // colspan row so they're impossible to miss.
+    // Render one streamed event into #batch-results. Synthetic error events
+    // collapse into a single colspan row so they're impossible to miss.
     function processBatchEvent(ev) {
       if (ev.kind === "error" || ev.error) {
         const tbody = document.querySelector("#batch-results tbody");
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 9;
+        td.colSpan = 10;
         td.style.color = "red";
         td.textContent = "step " + ev.step + ": " + ev.error;
         tr.append(td);
         tbody.append(tr);
         return;
       }
-      // Default: an "attempt" event (one per executed try).
       appendAttemptRow(ev);
-      // Mirror every batch attempt -- AT and sh both -- into the AT
-      // command log so it doubles as a unified history of every command
-      // ever issued on the page (single sends + batch sends + every
-      // retry). Timestamps come from the server.
-      //
-      // For sh, http_status is null (no HTTP round-trip happened), so we
-      // tag the row with "sh ok" / "sh err" derived from `matched` to
-      // give the column a meaningful value instead of an em-dash. The
-      // command text is prefixed with "[sh] " so AT vs sh is obvious at
-      // a glance even though they share the table.
-      const isAt    = ev.type === "at";
-      const cmdText = isAt ? ev.cmd : ("[sh] " + ev.cmd);
-      let httpCode;
-      if (isAt) {
-        httpCode = (ev.http_status !== null && ev.http_status !== undefined)
-          ? ev.http_status
-          : (ev.matched ? 200 : "\u2014");
-      } else {
-        httpCode = ev.matched ? "sh ok" : "sh err";
-      }
-      appendAtRow(
-        tsFromEpochMs(ev.started_at),
-        cmdText,
-        tsFromEpochMs(ev.ended_at),
-        httpCode,
-        ev.output
-      );
     }
 
     // POST the textarea to /api/batch/run and consume the streamed NDJSON
@@ -1001,6 +924,7 @@
         let stepCnt    = 0;       // distinct steps (one per final attempt)
         let allOk      = true;
         let aborted    = false;   // user clicked Abort and the server honoured it
+        let tsvName    = "";      // batch-results TSV filename from final meta event
 
         // Process one NDJSON line: parse, render, update status counter.
         // Each "attempt" event with action info attached marks the end of
@@ -1012,6 +936,12 @@
           let ev;
           try { ev = JSON.parse(trimmed); }
           catch (e) { return; }            // ignore garbage; never throw mid-stream
+          // Server sends a meta line after all attempts with the TSV path.
+          if (ev.kind === "meta") {
+            if (ev.tsv_name) tsvName = ev.tsv_name;
+            else if (ev.tsv_file) tsvName = ev.tsv_file.split("/").pop();
+            return;
+          }
           processBatchEvent(ev);
           if (ev.kind === "aborted") {
             aborted = true;
@@ -1049,9 +979,10 @@
         const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
         const verdict = aborted ? "aborted"
                                 : (allOk ? "all OK" : "some failed");
-        statusEl.textContent = "done: " + attemptCnt + " attempt(s) over " +
-                               stepCnt + " step(s) in " + elapsed + "s, " +
-                               verdict;
+        let summary = "done: " + attemptCnt + " attempt(s) over " +
+                      stepCnt + " step(s) in " + elapsed + "s, " + verdict;
+        if (tsvName) summary += " \u2014 log " + tsvName;
+        statusEl.textContent = summary;
       } catch (err) {
         statusEl.textContent = "error: " + err.message;
       } finally {
