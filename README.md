@@ -49,9 +49,6 @@ After logged in, the WebApp shall present a simple WebGUI with:
 		- **QCSuper**, **QLog**, and **SIMtrace2** (via Osmocom Simtrace2) are supported
 		- QCSuper and QLog share the modem Diag port — only one can run at a time
 		- by clicking Start and Stop you start or terminate trace collection
-	- **Logs**
-	          ![](attachments/Pasted%20image%2020260504100031.png)
-		- contains the information about all logging attempts
 	- **Log Files**
 	          ![](attachments/Pasted%20image%2020260504100107.png)
 		- lists files under `/opt/serial-modemtracing/traces` and
@@ -249,11 +246,11 @@ Bus 003 Device 014: ID 2c7c:0296 Quectel Wireless Solutions Co., Ltd. BG96 CAT-M
 The UI surfaces:
 
 1. **Modem Information** - which interfaces were detected (red rows on
-   missing interfaces). Banner buttons restart individual backend services
-   when serial ports get out of sync after a modem reboot.
+   missing interfaces).
 2. **Trace and Logs Management** - QCSuper / QLog / SIMtracer2 status dots,
-   Start/Stop buttons, an event log, and a **Log Files** tab to download or
-   delete captured files (`pcap`, batch TSV, QLog output, …).
+   Start/Stop buttons, **Restart Service** buttons (when serial ports go stale
+   after a modem reboot), and a **Log Files** tab to download or delete captured
+   files (`pcap`, batch TSV, QLog output, …).
 3. **Modem Commands** - single AT command sender and a 250-line script
    runner (**Modem Batch Instructions**) with live streamed results and
    per-run TSV export.

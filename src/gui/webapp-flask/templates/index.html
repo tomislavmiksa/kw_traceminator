@@ -57,7 +57,6 @@
     tbody tr:nth-child(even) { background: #f0f0f0; }
 
     /* Log tables get a single outer 1px border but no internal cell borders. */
-    #events-log,
     #batch-results { border: 1px solid #000; }
 
     /* The Modem information table is a small key/value display, not a wide
@@ -165,19 +164,33 @@
     #page-header a {
       color: #c2410c;
     }
-    .page-header-left,
-    .page-header-right {
+    .page-header-left {
       line-height: 1.35;
+      font-size: 1.05em;
+      font-weight: bold;
     }
     .page-header-right {
+      line-height: 1.35;
       text-align: right;
     }
 
-    #page-footer {
+    .restart-buttons {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 1em;
+      flex-direction: row;
+      gap: 8px;
+      margin: 10px 0 0 0;
+      width: 100%;
+      font-style: normal;
+    }
+    #restart-serialmodem,
+    #restart-qcsuper,
+    #restart-simtracer {
+      flex: 1 1 0;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+
+    #page-footer {
       margin-top: 2em;
       padding: 1em 14px 2em 14px;
       border-top: 2px solid #c2410c;
@@ -189,14 +202,23 @@
     #page-footer a {
       color: #c2410c;
     }
-    #page-footer p {
-      margin: 0 0 0.4em 0;
+    #footer-table {
+      width: 100%;
+      border: none;
+      border-collapse: collapse;
+      table-layout: fixed;
     }
-    #page-footer p:last-child {
-      margin-bottom: 0;
+    #footer-table th,
+    #footer-table td {
+      border: none;
+      vertical-align: top;
+      text-align: left;
+      padding: 4px 12px 4px 0;
+      font-weight: normal;
     }
-    .footer-right {
-      text-align: right;
+    #footer-table th {
+      font-weight: bold;
+      padding-bottom: 0.5em;
     }
   </style>
 </head>
@@ -241,27 +263,25 @@
        devtools without flipping a flag. Remove if you don't use it. -->
   <h2 hidden>Raw response</h2>
   <pre hidden id="raw"></pre>
-  <br><br>
+
+    <!-- ============================================================
+       SECTION 2: Trace and Logs Management
+       Two-tab UI: "Control" (status dots + start/stop buttons) and
+       "Log Files" (browse/download/delete captured files).
+       ============================================================ -->
+  <h1>Trace and Logs Management</h1>
 
   <div style="border: 1px solid #e0c97f; background: #fff8dc; padding: 10px 14px; margin: 1em 0; font-style: italic; color: #5a4a1a;">
     Sometimes after restarting the modem, the serial interfaces go out of sync, and become unresponsive...
     <br><br>
     If this happens try to restart the service by clicking the buttons below.
-    <p style="margin: 10px 0 0 0; font-style: normal;">
-      <button id="restart-serialmodem">Restart Serial Modem</button>
-      <button id="restart-qcsuper">Restart QCSuper Service</button>
+    <div class="restart-buttons">
+      <button id="restart-serialmodem">Restart AT Serial Interface Communication</button>
+      <button id="restart-qcsuper">Restart Modem Diag Trace Service</button>
       <button id="restart-simtracer">Restart Simtracer Service</button>
-    </p>
+    </div>
     <p id="restart-status" style="margin: 8px 0 0 0; font-style: normal; color: #999;">idle</p>
   </div>
-
-    <!-- ============================================================
-       SECTION 2: Trace and Logs Management
-       Two-tab UI: "Control" (status dots + start/stop buttons) and
-       "Logs" (chronological events table populated by every Start/
-       Stop click on either qcsuper or simtracer).
-       ============================================================ -->
-  <h1>Trace and Logs Management</h1>
 
   <!-- A .tab-group is the scoping container for one set of tabs. Multiple
        groups can coexist on the page; the click handler in JS uses
@@ -270,7 +290,6 @@
   <div class="tab-group">
   <div class="tabs">
     <button class="tab-button active" data-tab="control">Control</button>
-    <button class="tab-button"        data-tab="logs">Logs</button>
     <button class="tab-button"        data-tab="log-files">Log Files</button>
   </div>
 
@@ -317,24 +336,6 @@
     <p id="qcsuper-status">qcsuper: idle</p>
     <p id="qlog-status">qlog: idle</p>
     <p id="simtracer-status">simtracer: idle</p>
-  </div>
-
-  <!-- LOGS panel: chronological log of every trace start/stop event. Newest
-       row is prepended at the top. Populated by appendEventRow() which is
-       called from qcsuperAction(), qlogAction(), and simtracerAction(). -->
-  <div class="tab-panel" data-tab-panel="logs">
-    <table id="events-log" cellpadding="4">
-      <thead>
-        <tr>
-          <th>Sending timestamp</th>
-          <th>Instruction Sent</th>
-          <th>Response timestamp</th>
-          <th>HTTP Status Code</th>
-          <th>Response data</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
   </div>
 
   <!-- LOG FILES panel: lists pcap (and other) files written to disk by the
@@ -423,18 +424,26 @@
 
 
   <footer id="page-footer">
-    <div class="footer-left">
-      <p><a href="https://www.zgmc.info">https://www.zgmc.info</a></p>
-      <p>Phone : +49 (0) 176 8555 29 03</p>
-      <p>WhatsApp : +49 (0) 176 8555 29 03</p>
-      <p>Email(s) : <a href="mailto:tomislav.miksa@zgmc.info">tomislav.miksa@zgmc.info</a></p>
-    </div>
-    <div class="footer-right">
-      <p>Address :<br>
-        Vesaliusstr. 80<br>
-        13187 Berlin<br>
-        Germany, Europe</p>
-    </div>
+    <table id="footer-table" cellpadding="4">
+      <thead>
+        <tr>
+          <th>Website</th>
+          <th>Phone</th>
+          <th>WhatsApp</th>
+          <th>Email(s)</th>
+          <th>Address</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><a href="https://www.zgmc.info">https://www.zgmc.info</a></td>
+          <td>+49 (0) 176 8555 29 03</td>
+          <td>+49 (0) 176 8555 29 03</td>
+          <td><a href="mailto:tomislav.miksa@zgmc.info">tomislav.miksa@zgmc.info</a></td>
+          <td>Vesaliusstr. 80<br>13187 Berlin<br>Germany, Europe</td>
+        </tr>
+      </tbody>
+    </table>
   </footer>
 
   <!-- ============================================================
@@ -611,75 +620,28 @@
       }
     }
 
-    // Prepend a row to the events log with the request side filled and the
-    // response cells left as "...". Returns an updater so the caller can fill
-    // them in once the response arrives (or fails).
-    //
-    // Two-stage row creation gives the user instant feedback that a click
-    // registered, even if the upstream takes a few seconds to respond.
-    function appendEventRow(sentTs, instruction) {
-      const log = document.querySelector("#events-log tbody");
-      const tr  = document.createElement("tr");
-      const cells = [];
-      // Five fixed columns: sentTs | instruction | recvTs | status | data
-      for (let i = 0; i < 5; i++) {
-        const td = document.createElement("td");
-        tr.append(td);
-        cells.push(td);
-      }
-      cells[0].textContent = sentTs;
-      cells[1].textContent = instruction;
-      cells[2].textContent = "...";        // placeholders until response arrives
-      cells[3].textContent = "...";
-      cells[4].textContent = "...";
-      log.prepend(tr);
-      // Closure captures `cells`; caller will invoke setResponse exactly once.
-      return {
-        setResponse(recvTs, statusCode, data) {
-          cells[2].textContent = recvTs;
-          cells[3].textContent = statusCode;
-          renderResponseCell(cells[4], data);            // pretty-print JSON if possible
-        },
-      };
-    }
-
     // Click handler for QCSuper Start/Stop. action is "start" or "stop".
     // Both buttons are disabled while the request is in flight to prevent
     // a fast double-click from spawning two qcsuper processes.
     async function qcsuperAction(action) {
-      // action is "start" or "stop"
       const startBtn    = document.getElementById("qcsuper-start");
       const stopBtn     = document.getElementById("qcsuper-stop");
       const stat        = document.getElementById("qcsuper-status");
-      const instruction = "qcsuper-" + action;
       const sentTs      = ts();
 
       startBtn.disabled = true;
       stopBtn.disabled  = true;
       stat.textContent  = "qcsuper: " + action + " requested at " + sentTs + " ...";
-      // Phase 1: row appears immediately (with "..." placeholders) so the
-      // user sees the request landed even if the upstream is slow.
-      const row = appendEventRow(sentTs, instruction);
 
       try {
-        // POST is used (rather than the upstream's GET) to avoid browser
-        // GET caching/prefetch from accidentally starting a trace.
         const r = await fetch("/api/qcsuper-" + action, { method: "POST" });
-        const text = await r.text();                     // raw body; pretty-print happens in setResponse
-        const recvTs = ts();
-        // Phase 2: row's response cells get filled in.
-        row.setResponse(recvTs, r.status, text);
+        const text = await r.text();
         stat.textContent = "qcsuper: " + action + ": HTTP " + r.status + " - " + text;
       } catch (err) {
-        // Reached only on network error -- proxy 502s arrive as a normal
-        // (non-throwing) Response with .status===502.
-        const recvTs = ts();
-        row.setResponse(recvTs, "\u2014", "error: " + err.message);   // \u2014 = em-dash
         stat.textContent = "qcsuper: " + action + " error: " + err.message;
       } finally {
         startBtn.disabled = false;
         stopBtn.disabled  = false;
-        // QCSuper start/stop may have stopped QLog on the server (shared Diag port).
         pollQcsuper();
         pollQlog();
       }
@@ -705,28 +667,21 @@
       const startBtn    = document.getElementById("qlog-start");
       const stopBtn     = document.getElementById("qlog-stop");
       const stat        = document.getElementById("qlog-status");
-      const instruction = "qlog-" + action;
       const sentTs      = ts();
 
       startBtn.disabled = true;
       stopBtn.disabled  = true;
       stat.textContent  = "qlog: " + action + " requested at " + sentTs + " ...";
-      const row = appendEventRow(sentTs, instruction);
 
       try {
         const r = await fetch("/api/qlog-" + action, { method: "POST" });
         const text = await r.text();
-        const recvTs = ts();
-        row.setResponse(recvTs, r.status, text);
         stat.textContent = "qlog: " + action + ": HTTP " + r.status + " - " + text;
       } catch (err) {
-        const recvTs = ts();
-        row.setResponse(recvTs, "\u2014", "error: " + err.message);
         stat.textContent = "qlog: " + action + " error: " + err.message;
       } finally {
         startBtn.disabled = false;
         stopBtn.disabled  = false;
-        // QLog start/stop may have stopped QCSuper on the server (shared Diag port).
         pollQlog();
         pollQcsuper();
       }
@@ -750,32 +705,25 @@
     }
 
     async function simtracerAction(action) {
-      // action is "start" or "stop"
       const startBtn    = document.getElementById("simtracer-start");
       const stopBtn     = document.getElementById("simtracer-stop");
       const stat        = document.getElementById("simtracer-status");
-      const instruction = "simtracer-" + action;
       const sentTs      = ts();
 
       startBtn.disabled = true;
       stopBtn.disabled  = true;
       stat.textContent  = "simtracer: " + action + " requested at " + sentTs + " ...";
-      const row = appendEventRow(sentTs, instruction);
 
       try {
         const r = await fetch("/api/simtracer-" + action, { method: "POST" });
         const text = await r.text();
-        const recvTs = ts();
-        row.setResponse(recvTs, r.status, text);
         stat.textContent = "simtracer: " + action + ": HTTP " + r.status + " - " + text;
       } catch (err) {
-        const recvTs = ts();
-        row.setResponse(recvTs, "\u2014", "error: " + err.message);
         stat.textContent = "simtracer: " + action + " error: " + err.message;
       } finally {
         startBtn.disabled = false;
         stopBtn.disabled  = false;
-        pollSimtracer();   // refresh dot immediately, don't wait 5s
+        pollSimtracer();
       }
     }
 
@@ -1246,9 +1194,9 @@
     // #restart-status, kept in JS (rather than read from the button) so a
     // future label tweak in HTML can't silently break the status messages.
     document.getElementById("restart-serialmodem").addEventListener("click",
-      () => restartService("serialmodem", "Serial Modem"));
+      () => restartService("serialmodem", "AT Serial Interface Communication"));
     document.getElementById("restart-qcsuper")    .addEventListener("click",
-      () => restartService("qcsuper",     "QCSuper Service"));
+      () => restartService("qcsuper",     "Modem Diag Trace Service"));
     document.getElementById("restart-simtracer")  .addEventListener("click",
       () => restartService("simtracer",   "Simtracer Service"));
 

@@ -17,7 +17,7 @@ AT_API_BASE         = "http://localhost:8666"
 MODEMTRACE_API_BASE = "http://localhost:8888"   # qcsuper trace API
 SIMTRACER_API_BASE  = "http://localhost:8777"   # simtrace2 trace API
 
-# Services exposed by the "Restart Service" buttons in the page banner.
+# Services exposed by the "Restart Service" buttons under Trace and Logs Management.
 # Each entry is { systemd unit -> TCP port we expect to be listening once
 # the unit is back up }. The endpoint runs `systemctl restart <unit>` then
 # polls 127.0.0.1:<port> until it accepts a connection (or we time out).

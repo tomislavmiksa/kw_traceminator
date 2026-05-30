@@ -82,13 +82,13 @@ The page is divided into four `<h1>` sections:
 
 | Section                       | What it does                                                                                |
 |-------------------------------|---------------------------------------------------------------------------------------------|
-| **Modem Information**         | Table of detected modem interfaces (red row when not detected). **Restart Service** buttons run `systemctl restart` on each backend unit and wait for its TCP port. |
-| **Trace and Logs Management** | QCSuper, QLog, and SIMtracer2 status dots, Start/Stop buttons, event log, Log Files browser (download + delete). |
+| **Modem Information**         | Table of detected modem interfaces (red row when not detected). |
+| **Trace and Logs Management** | QCSuper, QLog, and SIMtracer2 status dots, Start/Stop buttons, **Restart Service** buttons, Log Files browser (download + delete). |
 | **Modem Commands**            | Single AT command sender and **Modem Batch Instructions** script runner with live streamed results. |
 
 The status dots poll the corresponding `*-active` endpoint every 5s and turn
-red/green/gray; the event log records every Start/Stop click with timestamps
-and the raw JSON response.
+red/green/gray. Per-service status lines under the Control panel show the
+latest Start/Stop request and HTTP response.
 
 # API endpoints (server side)
 
