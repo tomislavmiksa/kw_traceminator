@@ -22,7 +22,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Modem Info</title>
+  <title>TRACEMINATOR</title>
 
   <!--
     All visual styling lives here. Goal is "barely-styled but readable":
@@ -147,9 +147,71 @@
       background: #f5f5f5;
       cursor: not-allowed;
     }
+
+    /* ---------------- page header / footer ---------------- */
+
+    #page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1em;
+      padding: 6px 14px;
+      margin: 0 0 1em 0;
+      font: inherit;
+      font-style: italic;
+      font-size: 0.85em;
+      color: #c2410c;
+    }
+    #page-header a {
+      color: #c2410c;
+    }
+    .page-header-left,
+    .page-header-right {
+      line-height: 1.35;
+    }
+    .page-header-right {
+      text-align: right;
+    }
+
+    #page-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1em;
+      margin-top: 2em;
+      padding: 1em 14px 2em 14px;
+      border-top: 2px solid #c2410c;
+      color: #c2410c;
+      font-style: italic;
+      font-size: 0.9em;
+      line-height: 1.5;
+    }
+    #page-footer a {
+      color: #c2410c;
+    }
+    #page-footer p {
+      margin: 0 0 0.4em 0;
+    }
+    #page-footer p:last-child {
+      margin-bottom: 0;
+    }
+    .footer-right {
+      text-align: right;
+    }
   </style>
 </head>
 <body>
+
+  <header id="page-header">
+    <div class="page-header-left">
+      <div>TRACEMINATOR running on {{ hostname }}</div>
+      <div>{{ architecture }}</div>
+    </div>
+    <div class="page-header-right">
+      <div>Powered by</div>
+      <div><a href="https://www.zgmc.info">www.zgmc.info</a></div>
+    </div>
+  </header>
 
   <!-- ============================================================
        SECTION 1: Modem information
@@ -159,7 +221,6 @@
   <h1>Modem information</h1>
 
   <p>
-    Source: <code>/api/modem</code><br><br>
     <button id="refresh">Refresh</button>
   </p>
   <!-- Status line for loadInfo(): "idle" | "loading..." | "loaded at HH:MM:SS" | "error: ...". -->
@@ -294,6 +355,7 @@
           <th>Size</th>
           <th>Modified</th>
           <th>Download</th>
+          <th>Delete</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -359,6 +421,21 @@
     </div>
   </div>
 
+
+  <footer id="page-footer">
+    <div class="footer-left">
+      <p><a href="https://www.zgmc.info">https://www.zgmc.info</a></p>
+      <p>Phone : +49 (0) 176 8555 29 03</p>
+      <p>WhatsApp : +49 (0) 176 8555 29 03</p>
+      <p>Email(s) : <a href="mailto:tomislav.miksa@zgmc.info">tomislav.miksa@zgmc.info</a></p>
+    </div>
+    <div class="footer-right">
+      <p>Address :<br>
+        Vesaliusstr. 80<br>
+        13187 Berlin<br>
+        Germany, Europe</p>
+    </div>
+  </footer>
 
   <!-- ============================================================
        SECTION 4: All client-side logic.
@@ -716,8 +793,31 @@
 
     // Fetch the manifest and render one row per file. Each row's Download
     // cell contains a <a download> pointing at the per-file streaming URL.
-    // The server forces Content-Disposition: attachment so click -> save,
-    // not navigate.
+    // Delete removes the file on disk via DELETE /api/trace-files/<source>/<name>.
+    async function deleteTraceFile(source, name) {
+      const fstatus = document.getElementById("files-status");
+      if (!confirm("Delete " + name + " from disk?")) return;
+      fstatus.textContent = "deleting " + name + " ...";
+      try {
+        const url = "/api/trace-files/" +
+          encodeURIComponent(source) + "/" +
+          encodeURIComponent(name);
+        const r = await fetch(url, { method: "DELETE" });
+        if (!r.ok) {
+          let msg = "HTTP " + r.status;
+          try {
+            const data = await r.json();
+            if (data && data.error) msg = data.error;
+          } catch (e) { /* keep generic */ }
+          throw new Error(msg);
+        }
+        fstatus.textContent = "deleted " + name;
+        loadTraceFiles();
+      } catch (err) {
+        fstatus.textContent = "delete error: " + err.message;
+      }
+    }
+
     async function loadTraceFiles() {
       const fstatus = document.getElementById("files-status");
       const ftbody  = document.querySelector("#files-table tbody");
@@ -750,7 +850,12 @@
           // when saving; works because the request is same-origin.
           a.download  = f.name;
           dlTd.append(a);
-          tr.append(sourceTd, nameTd, sizeTd, mtimeTd, dlTd);
+          const delTd = document.createElement("td");
+          const delBtn = document.createElement("button");
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", () => deleteTraceFile(f.source, f.name));
+          delTd.append(delBtn);
+          tr.append(sourceTd, nameTd, sizeTd, mtimeTd, dlTd, delTd);
           ftbody.append(tr);
         }
         fstatus.textContent = "loaded " + files.length + " file(s) at " +

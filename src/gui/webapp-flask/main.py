@@ -1,5 +1,6 @@
 import csv
 import json
+import platform
 import re
 import socket
 import subprocess
@@ -51,7 +52,11 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 # serve the single page
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        hostname=platform.node(),
+        architecture=platform.machine(),
+    )
 
 # server-side proxy to the AT API so the browser stays same-origin (no CORS)
 @app.route("/api/modem", methods=["GET"])
@@ -256,12 +261,41 @@ def list_trace_files():
 # stream a single file as a download. send_from_directory does its own
 # safety check - it normalises and rejects any path that escapes `base`,
 # so user-supplied `filename` cannot reach files outside TRACE_DIRS.
+def _resolve_trace_file(source, filename):
+    """Return resolved Path if source/name is a regular file under TRACE_DIRS."""
+    base = TRACE_DIRS.get(source)
+    if base is None:
+        return None
+    base = base.resolve()
+    try:
+        candidate = (base / filename).resolve()
+        candidate.relative_to(base)
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
 @app.route("/api/trace-files/<source>/<path:filename>", methods=["GET"])
 def get_trace_file(source, filename):
     base = TRACE_DIRS.get(source)
     if base is None:
         abort(404)
     return send_from_directory(str(base), filename, as_attachment=True)
+
+
+@app.route("/api/trace-files/<source>/<path:filename>", methods=["DELETE"])
+def delete_trace_file(source, filename):
+    """Delete one trace file from disk. Path is validated like GET download."""
+    path = _resolve_trace_file(source, filename)
+    if path is None:
+        abort(404)
+    try:
+        path.unlink()
+    except OSError as e:
+        return jsonify(error=str(e)), 500
+    return jsonify(deleted=True, source=source, name=filename)
 
 # ============================================================
 # Script runner ("Modem Batch Instructions" tab)
