@@ -10,6 +10,9 @@
       /api/qcsuper-active   -> serial-modemtracing    (port 8888)
       /api/qcsuper-start    -> serial-modemtracing    (port 8888)
       /api/qcsuper-stop     -> serial-modemtracing    (port 8888)
+      /api/qlog-active      -> serial-modemtracing    (port 8888)
+      /api/qlog-start       -> serial-modemtracing    (port 8888)
+      /api/qlog-stop        -> serial-modemtracing    (port 8888)
       /api/simtracer-active -> serial-simtracing      (port 8777)
       /api/simtracer-start  -> serial-simtracing      (port 8777)
       /api/simtracer-stop   -> serial-simtracing      (port 8777)
@@ -80,6 +83,7 @@
     #status,
     #at-status,
     #qcsuper-status,
+    #qlog-status,
     #simtracer-status,
     #files-status,
     #batch-status,
@@ -214,8 +218,8 @@
 
   <!-- CONTROL panel: status dots + Start/Stop buttons.
        The 3-column "logs-status" table has identical structure for each
-       service (QCSuper, QLog, SIMtracer2). QLog buttons stay disabled --
-       its API isn't wired yet. -->
+       service (QCSuper, QLog, SIMtracer2). QCSuper and QLog share the Diag
+       port; starting one stops the other on the server. -->
   <div class="tab-panel active" data-tab-panel="control">
     <table id="logs-status" cellpadding="4">
       <thead>
@@ -227,38 +231,39 @@
       </thead>
       <tbody>
         <!-- ROW 1: status indicators. The bullet character (&#9679;) is
-             colored dynamically by pollQcsuper / pollSimtracer based on
-             /api/<svc>-active -> {"running": bool}. font-size: 3em is what
-             makes the dots large enough to read from across the room. -->
+             colored dynamically by pollQcsuper / pollQlog / pollSimtracer
+             based on /api/<svc>-active -> {"running": bool}. font-size: 3em
+             is what makes the dots large enough to read from across the room. -->
         <tr>
           <td><span id="status-qcsuper"   style="color: gray; font-size: 3em">&#9679;</span></td>
           <td><span id="status-qlog"      style="color: gray; font-size: 3em">&#9679;</span></td>
           <td><span id="status-simtracer" style="color: gray; font-size: 3em">&#9679;</span></td>
         </tr>
         <!-- ROW 2: Start buttons. Click -> POST /api/<svc>-start via
-             qcsuperAction("start") / simtracerAction("start"). -->
+             qcsuperAction / qlogAction / simtracerAction. -->
         <tr>
           <td><button id="qcsuper-start">Start</button></td>
-          <td><button id="qlog-start"      disabled>Start</button></td>
+          <td><button id="qlog-start">Start</button></td>
           <td><button id="simtracer-start">Start</button></td>
         </tr>
         <!-- ROW 3: Stop buttons. Same flow, "stop" verb. -->
         <tr>
           <td><button id="qcsuper-stop">Stop</button></td>
-          <td><button id="qlog-stop"      disabled>Stop</button></td>
+          <td><button id="qlog-stop">Stop</button></td>
           <td><button id="simtracer-stop">Stop</button></td>
         </tr>
       </tbody>
     </table>
-    <!-- Per-service status lines updated by qcsuperAction / simtracerAction.
-         Format: "<svc>: <verb>: HTTP <code> - <body>" or error variant. -->
+    <!-- Per-service status lines updated by qcsuperAction / qlogAction /
+         simtracerAction. Format: "<svc>: <verb>: HTTP <code> - <body>". -->
     <p id="qcsuper-status">qcsuper: idle</p>
+    <p id="qlog-status">qlog: idle</p>
     <p id="simtracer-status">simtracer: idle</p>
   </div>
 
   <!-- LOGS panel: chronological log of every trace start/stop event. Newest
        row is prepended at the top. Populated by appendEventRow() which is
-       called from both qcsuperAction() and simtracerAction(). -->
+       called from qcsuperAction(), qlogAction(), and simtracerAction(). -->
   <div class="tab-panel" data-tab-panel="logs">
     <table id="events-log" cellpadding="4">
       <thead>
@@ -645,16 +650,61 @@
       } finally {
         startBtn.disabled = false;
         stopBtn.disabled  = false;
-        pollQcsuper();   // refresh dot immediately, don't wait 5s
+        // QCSuper start/stop may have stopped QLog on the server (shared Diag port).
+        pollQcsuper();
+        pollQlog();
+      }
+    }
+
+    /* ---------- QLog (QXDM) trace control ---------- */
+
+    async function pollQlog() {
+      const el = document.getElementById("status-qlog");
+      try {
+        const r = await fetch("/api/qlog-active", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        if (d.running === true)       el.style.color = "green";
+        else if (d.running === false) el.style.color = "red";
+        else                          el.style.color = "gray";
+      } catch (err) {
+        el.style.color = "gray";
+      }
+    }
+
+    async function qlogAction(action) {
+      const startBtn    = document.getElementById("qlog-start");
+      const stopBtn     = document.getElementById("qlog-stop");
+      const stat        = document.getElementById("qlog-status");
+      const instruction = "qlog-" + action;
+      const sentTs      = ts();
+
+      startBtn.disabled = true;
+      stopBtn.disabled  = true;
+      stat.textContent  = "qlog: " + action + " requested at " + sentTs + " ...";
+      const row = appendEventRow(sentTs, instruction);
+
+      try {
+        const r = await fetch("/api/qlog-" + action, { method: "POST" });
+        const text = await r.text();
+        const recvTs = ts();
+        row.setResponse(recvTs, r.status, text);
+        stat.textContent = "qlog: " + action + ": HTTP " + r.status + " - " + text;
+      } catch (err) {
+        const recvTs = ts();
+        row.setResponse(recvTs, "\u2014", "error: " + err.message);
+        stat.textContent = "qlog: " + action + " error: " + err.message;
+      } finally {
+        startBtn.disabled = false;
+        stopBtn.disabled  = false;
+        // QLog start/stop may have stopped QCSuper on the server (shared Diag port).
+        pollQlog();
+        pollQcsuper();
       }
     }
 
     /* ---------- SIMtracer2 trace control ----------
-       Mirrors qcsuperAction / pollQcsuper exactly except for the URL
-       fragment, button IDs, status element, and instruction prefix. Kept
-       as a parallel pair (rather than parameterised) for clarity while
-       only two services are wired; collapse into a factory once a third
-       service (e.g. QLog) joins. */
+       Mirrors qcsuperAction / pollQcsuper for the simtracing API on :8777. */
 
     async function pollSimtracer() {
       const el = document.getElementById("status-simtracer");
@@ -1150,6 +1200,8 @@
     // that receives the Event object.
     document.getElementById("qcsuper-start")  .addEventListener("click", () => qcsuperAction("start"));
     document.getElementById("qcsuper-stop")   .addEventListener("click", () => qcsuperAction("stop"));
+    document.getElementById("qlog-start")     .addEventListener("click", () => qlogAction("start"));
+    document.getElementById("qlog-stop")      .addEventListener("click", () => qlogAction("stop"));
     document.getElementById("simtracer-start").addEventListener("click", () => simtracerAction("start"));
     document.getElementById("simtracer-stop") .addEventListener("click", () => simtracerAction("stop"));
 
@@ -1164,13 +1216,15 @@
     document.getElementById("restart-simtracer")  .addEventListener("click",
       () => restartService("simtracer",   "Simtracer Service"));
 
-    // Boot sequence: paint the page, then start two independent 5s polls
+    // Boot sequence: paint the page, then start three independent 5s polls
     // for the trace-control status dots. Independent intervals mean a hung
     // upstream for one service can't delay the other's poll.
     loadInfo();
     pollQcsuper();
+    pollQlog();
     pollSimtracer();
     setInterval(pollQcsuper,   5000);
+    setInterval(pollQlog,        5000);
     setInterval(pollSimtracer, 5000);
   </script>
 </body>

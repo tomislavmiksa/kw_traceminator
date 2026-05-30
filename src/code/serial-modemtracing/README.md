@@ -63,7 +63,10 @@ All endpoints are `GET` and return JSON.
 | GET    | `/trace-active` | Is `qcsuper.py` writing a pcap?                          |
 | GET    | `/trace-start`  | Start a new `qcsuper` capture                            |
 | GET    | `/trace-stop`   | SIGTERM all qcsuper trace processes                      |
-| GET    | `/trace-list`   | List pcap files in the trace directory                   |
+| GET    | `/trace-list`   | List files in the trace directory                        |
+| GET    | `/qlog-active`  | Is `/opt/QLog` running?                                  |
+| GET    | `/qlog-start`   | Start QLog (QXDM) capture into `TRACE_DIR`               |
+| GET    | `/qlog-stop`    | SIGTERM all QLog processes                               |
 
 ## Trace lifecycle
 
@@ -76,6 +79,34 @@ All endpoints are `GET` and return JSON.
 
 The trace runs in the background as a separate process group; combined
 stdout/stderr is appended to `/var/log/qcsuper-api.log`.
+
+## QLog (QXDM) lifecycle
+
+QLog is started as:
+
+```
+/opt/QLog -s /opt/serial-modemtracing/traces -p <diag port>
+```
+
+`<diag port>` is the same `/dev/ttyUSB*` path QCSuper uses (from
+`http://localhost:8666/modem`). QCSuper and QLog share the Diag port; the
+API enforces exclusivity automatically: `/trace-start` stops any running
+QLog first, and `/qlog-start` stops any running QCSuper first (1 s pause
+so the port is released). The JSON response may include `stopped_qlog` or
+`stopped_qcsuper` listing what was terminated.
+
+```
+# is QLog running?
+curl -s http://localhost:8888/qlog-active | jq
+
+# start QLog
+curl -s http://localhost:8888/qlog-start | jq
+
+# stop QLog
+curl -s http://localhost:8888/qlog-stop | jq
+```
+
+Service log: `/var/log/qlog-api.log`.
 
 ```
 # is a qcsuper trace active?

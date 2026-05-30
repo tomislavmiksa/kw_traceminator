@@ -98,6 +98,31 @@ def qcsuper_stop():
         return jsonify(error=f"could not reach {MODEMTRACE_API_BASE}: {e}"), 502
     return (r.text, r.status_code, {"Content-Type": "application/json"})
 
+# proxy QLog (QXDM) trace status / start / stop on serial-modemtracing
+@app.route("/api/qlog-active", methods=["GET"])
+def qlog_active():
+    try:
+        r = requests.get(f"{MODEMTRACE_API_BASE}/qlog-active")
+    except requests.RequestException as e:
+        return jsonify(error=f"could not reach {MODEMTRACE_API_BASE}: {e}"), 502
+    return (r.text, r.status_code, {"Content-Type": "application/json"})
+
+@app.route("/api/qlog-start", methods=["POST", "GET"])
+def qlog_start():
+    try:
+        r = requests.get(f"{MODEMTRACE_API_BASE}/qlog-start")
+    except requests.RequestException as e:
+        return jsonify(error=f"could not reach {MODEMTRACE_API_BASE}: {e}"), 502
+    return (r.text, r.status_code, {"Content-Type": "application/json"})
+
+@app.route("/api/qlog-stop", methods=["POST", "GET"])
+def qlog_stop():
+    try:
+        r = requests.get(f"{MODEMTRACE_API_BASE}/qlog-stop")
+    except requests.RequestException as e:
+        return jsonify(error=f"could not reach {MODEMTRACE_API_BASE}: {e}"), 502
+    return (r.text, r.status_code, {"Content-Type": "application/json"})
+
 # proxy simtracer trace status (used by the status indicator)
 @app.route("/api/simtracer-active", methods=["GET"])
 def simtracer_active():

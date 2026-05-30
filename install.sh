@@ -89,6 +89,18 @@ function installall {
       pip3 install -r requirements.txt
       deactivate
    fi
+
+   # QLOG INSTALLATION
+   # ------------------------------------------------------------
+   # for more information about the service refer to https://github.com/p1sec/QLog
+   # if the link already exists, do nothing
+   if [ -d /opt/QLog ]; then
+      echo "Link already exists"
+   else
+      # create link in opt directory for all the API services
+      cp -R $CURRENT_DIR/bin/aarch64/QLog /opt/QLog
+   fi
+   
    # SIMTRACE2 API SERVICE
    # ------------------------------------------------------------
    # for more information about the service refer to ./src/code/serial-simtracing/README.md

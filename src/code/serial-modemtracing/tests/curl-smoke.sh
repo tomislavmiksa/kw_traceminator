@@ -45,6 +45,18 @@ trace() {
    call GET /trace-list
 }
 
+qlog() {
+   call GET /qlog-active
+   call GET /qlog-stop
+   call GET /qlog-start
+   echo "=== QLog capturing for ${CAPTURE_SECONDS}s ==="
+   sleep "$CAPTURE_SECONDS"
+   call GET /qlog-active
+   call GET /qlog-stop
+   sleep 1
+   call GET /trace-list
+}
+
 cleanup() {
    call GET /trace-stop
 }
@@ -52,14 +64,17 @@ cleanup() {
 case "${1:-full}" in
    discovery) discovery ;;
    trace)     trace ;;
+   qlog)      qlog ;;
    cleanup)   cleanup ;;
    full)
       discovery
       trace
       cleanup
+      qlog
+      cleanup
       ;;
    *) echo "unknown section: $1" >&2
-      echo "usage: $0 [discovery|trace|cleanup|full]" >&2
+      echo "usage: $0 [discovery|trace|qlog|cleanup|full]" >&2
       exit 2
       ;;
 esac
