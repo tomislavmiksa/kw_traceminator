@@ -20,6 +20,9 @@ export SYSTEMD_PAGER=cat
 # get the current directory
 CURRENT_DIR=$(pwd)
 
+# get the server architecture
+ARCH=$(uname -m)
+
 usage() { sed -n '2,6p' "$0"; }
 
 INSTALL=0
@@ -97,8 +100,14 @@ function installall {
    if [ -d /opt/QLog ]; then
       echo "Link already exists"
    else
-      # create link in opt directory for all the API services
-      cp -R $CURRENT_DIR/bin/aarch64/QLog /opt/QLog
+      if [ "$ARCH" == "aarch64" ]; then
+         cp -R $CURRENT_DIR/bin/aarch64/QLog /opt/QLog
+      elif [ "$ARCH" == "x86_64" ]; then
+         cp -R $CURRENT_DIR/bin/x86_64/QLog /opt/QLog
+      else
+         echo "Unsupported architecture: $ARCH"
+         exit 1
+      fi
    fi
    
    # SIMTRACE2 API SERVICE
